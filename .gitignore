@@ -1,0 +1,25 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Secrets — never commit (see CLAUDE.md "Data hygiene")
+.env
+.env.*
+!.env.example
+*-key.json
+*-credentials.json
+service-account*.json
+
+# Local sample data that may contain real PII
+sample_data/real/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/

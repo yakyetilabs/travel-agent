@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv:*)",
+      "Bash(adk:*)",
+      "Bash(pytest:*)",
+      "Bash(gcloud auth print-access-token)",
+      "Bash(gcloud config:*)",
+      "Bash(git status)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)"
+    ],
+    "ask": ["Bash(gcloud run deploy:*)", "Bash(gcloud services:*)", "Bash(gsutil:*)"],
+    "deny": ["Bash(rm -rf:*)", "Read(.env)", "Read(./sample_data/real/**)"]
+  }
+}
