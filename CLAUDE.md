@@ -22,7 +22,9 @@ fare exists. `finalizer` assembles the structured `TravelQualificationOutput`.
 
 - Python 3.12 (managed by pyenv, env by uv)
 - google-adk[a2a] 2.0 Beta — agent framework
-- Gemini 2.5 Pro for reasoning agents, Gemini 2.5 Flash for intake parsing
+- Gemini 2.5 Flash for all agents — chosen to keep this portfolio project's Vertex
+  AI cost minimal. (Reasoning agents like policy/finalizer could be upgraded to
+  Gemini 2.5 Pro for higher quality at ~10x the token cost.)
 - Cloud Run for deployment
 - `google-adk[mcp]` extra is installed for future MCP use (e.g. a sqlite audit
   log in the finalizer). NOT wired up yet — there is currently no MCP server

@@ -21,6 +21,12 @@ dependencies = [
 [tool.uv]
 package = false
 
+[tool.pytest.ini_options]
+# Tests import from the repo root (e.g. `from tools.fare_request import ...`),
+# so put the project root on sys.path during collection.
+pythonpath = ["."]
+testpaths = ["tests"]
+
 [tool.pyright]
 venvPath = "."
 venv = ".venv"

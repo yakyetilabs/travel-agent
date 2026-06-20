@@ -24,8 +24,9 @@ gcloud run deploy travel-prequal \
 
 ## Smoke test
 
-After deploy, hit <service-url>/health and <service-url>/agents to confirm
-both return 200.
+After deploy, hit `<service-url>/health` and `<service-url>/list-apps` to confirm
+both return 200 (ADK's FastAPI app exposes `/health` and `/list-apps`; there is
+no `/agents` route). `/list-apps` should include `orchestrator`.
 
 ## Common failures
 

@@ -49,7 +49,7 @@ Process:
 
 root_agent = LlmAgent(
     name="policy_agent",
-    model="gemini-2.5-pro",
+    model="gemini-2.5-flash",
     instruction=INSTRUCTION,
     tools=[
         check_budget,

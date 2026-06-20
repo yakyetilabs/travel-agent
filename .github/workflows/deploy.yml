@@ -1,0 +1,90 @@
+name: ci-cd
+
+# Test on every PR; test + deploy on push to main. Auth to GCP is keyless via
+# Workload Identity Federation (no service-account keys). Required repo variables:
+#   GCP_PROJECT, GCP_REGION, GCP_WIF_PROVIDER, GCP_DEPLOY_SA  (see scripts/setup-wif.sh)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write   # required for WIF OIDC
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install deps
+        run: uv sync
+      - name: Tests (unit + contract tripwire)
+        run: uv run pytest -q
+
+  deploy:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        name: Authenticate to GCP (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - id: engine
+        name: Resolve the deployed engine URL
+        run: |
+          URL=$(gcloud run services describe travel-fare-engine \
+            --project "${{ vars.GCP_PROJECT }}" --region "${{ vars.GCP_REGION }}" \
+            --format='value(status.url)')
+          if [ -z "$URL" ]; then echo "engine service not found — deploy it first"; exit 1; fi
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy orchestrator (private, Vertex)
+        run: |
+          gcloud run deploy travel-prequal \
+            --source . \
+            --project "${{ vars.GCP_PROJECT }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --service-account "travel-prequal-sa@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com" \
+            --no-allow-unauthenticated \
+            --min-instances=0 --max-instances=2 --cpu=1 --memory=1Gi --timeout=300 \
+            --set-env-vars "GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=${{ vars.GCP_PROJECT }},GOOGLE_CLOUD_LOCATION=${{ vars.GCP_REGION }},FARE_ENGINE_URL=${{ steps.engine.outputs.url }}"
+
+      - id: svc
+        name: Resolve orchestrator URL
+        run: |
+          URL=$(gcloud run services describe travel-prequal \
+            --project "${{ vars.GCP_PROJECT }}" --region "${{ vars.GCP_REGION }}" \
+            --format='value(status.url)')
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+
+      - id: idtoken
+        name: Mint ID token for the smoke test
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+          token_format: id_token
+          id_token_audience: ${{ steps.svc.outputs.url }}
+          id_token_include_email: true
+
+      - name: Smoke test (/list-apps includes orchestrator)
+        run: |
+          URL="${{ steps.svc.outputs.url }}"
+          BODY=$(curl -sS -H "Authorization: Bearer ${{ steps.idtoken.outputs.id_token }}" \
+            "${URL}/list-apps")
+          echo "list-apps: $BODY"
+          echo "$BODY" | jq -e 'index("orchestrator")' >/dev/null \
+            || { echo "orchestrator app not listed"; exit 1; }
+          echo "Smoke test passed."

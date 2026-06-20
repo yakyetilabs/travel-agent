@@ -4,6 +4,7 @@ import logging
 import os
 import time
 from collections.abc import Generator
+from urllib.parse import urlparse
 
 import google.auth.transport.requests
 import httpx
@@ -48,15 +49,30 @@ class _GCPIdTokenAuth(httpx.Auth):
 
 
 _fare_engine_url = os.environ["FARE_ENGINE_URL"]
-_authed_client = httpx.AsyncClient(
-    auth=_GCPIdTokenAuth(audience=_fare_engine_url),
-    timeout=httpx.Timeout(60.0, connect=10.0),
-)
+
+
+def _is_local(url: str) -> bool:
+    """True if the URL targets the local machine, where the engine runs
+    unauthenticated and no Cloud Run ID token can (or should) be minted."""
+    return urlparse(url).hostname in ("localhost", "127.0.0.1", "::1", "[::1]")
+
+# Local dev hits an unauthenticated engine, so skip ID-token auth (fetching one
+# would require GCP credentials and fail). Deployed engines run
+# --no-allow-unauthenticated, so every call carries an ID token.
+_timeout = httpx.Timeout(60.0, connect=10.0)
+if _is_local(_fare_engine_url):
+    logger.info("FARE_ENGINE_URL is local (%s); calling without ID-token auth", _fare_engine_url)
+    _client = httpx.AsyncClient(timeout=_timeout)
+else:
+    _client = httpx.AsyncClient(
+        auth=_GCPIdTokenAuth(audience=_fare_engine_url),
+        timeout=_timeout,
+    )
 
 fare_engine = RemoteA2aAgent(
     name="fare_engine",
     agent_card=f"{_fare_engine_url}/.well-known/agent-card.json",
-    httpx_client=_authed_client,
+    httpx_client=_client,
 )
 
 # Pipeline order matters: fare_prep derives the engine's request from intake, the
