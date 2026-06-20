@@ -68,6 +68,15 @@ for sa in "${RUNTIME_SAS[@]}"; do
     --role roles/iam.serviceAccountUser --project "${PROJECT_ID}" >/dev/null
 done
 
+echo "==> Allowing the deployer to act as the Cloud Build service account..."
+# 'gcloud run deploy --source' builds the image via Cloud Build, which runs as the
+# Compute Engine default SA. The deployer must be able to act as it, or the build
+# fails with: "caller does not have permission to act as service account ...".
+gcloud iam service-accounts add-iam-policy-binding \
+  "${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --member "serviceAccount:${DEPLOYER_SA}" \
+  --role roles/iam.serviceAccountUser --project "${PROJECT_ID}" >/dev/null
+
 echo "==> Creating Workload Identity Pool + GitHub OIDC provider..."
 gcloud iam workload-identity-pools describe "${POOL}" --location=global --project "${PROJECT_ID}" >/dev/null 2>&1 \
   || gcloud iam workload-identity-pools create "${POOL}" \
