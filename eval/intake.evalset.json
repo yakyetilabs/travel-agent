@@ -1,0 +1,85 @@
+{
+  "eval_set_id": "intake_baseline",
+  "name": "intake baseline",
+  "description": "Intake agent parses natural-language trip requests into structured IntakeOutput. Graded on response match (no tools). All traveler data is obviously fake per CLAUDE.md data-hygiene rule.",
+  "eval_cases": [
+    {
+      "eval_id": "complete_single_adult_economy",
+      "conversation": [
+        {
+          "invocation_id": "intake-1",
+          "user_content": {
+            "role": "user",
+            "parts": [
+              {
+                "text": "Hi, I'm Test Traveler (test.traveler@example.com, employee 00001, Engineering). I need to fly from JFK to LAX on 2026-09-15, returning 2026-09-20, economy class, for a client meeting. Just me, one adult."
+              }
+            ]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "{\"traveler\":{\"name\":\"Test Traveler\",\"email\":\"test.traveler@example.com\",\"employee_id\":\"00001\",\"department\":\"Engineering\"},\"trip\":{\"origin\":\"JFK\",\"destination\":\"LAX\",\"departure_date\":\"2026-09-15\",\"return_date\":\"2026-09-20\",\"passengers\":[{\"count\":1,\"type\":\"adult\"}],\"travel_class\":\"economy\",\"trip_purpose\":\"client_meeting\"},\"missing_fields\":[],\"ready_for_policy\":true}"
+              }
+            ]
+          },
+          "intermediate_data": { "tool_uses": [], "tool_responses": [] }
+        }
+      ],
+      "session_input": { "app_name": "intake", "user_id": "u-eval", "state": {} }
+    },
+    {
+      "eval_id": "missing_fields_gated",
+      "conversation": [
+        {
+          "invocation_id": "intake-2",
+          "user_content": {
+            "role": "user",
+            "parts": [
+              {
+                "text": "I want to book a trip from JFK to SFO in business class for a conference. Two adults and one child."
+              }
+            ]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "{\"traveler\":{\"name\":null,\"email\":null,\"employee_id\":null,\"department\":null},\"trip\":{\"origin\":\"JFK\",\"destination\":\"SFO\",\"departure_date\":null,\"return_date\":null,\"passengers\":[{\"count\":2,\"type\":\"adult\"},{\"count\":1,\"type\":\"child\"}],\"travel_class\":\"business\",\"trip_purpose\":\"conference\"},\"missing_fields\":[\"traveler.name\",\"traveler.email\",\"trip.departure_date\"],\"ready_for_policy\":false}"
+              }
+            ]
+          },
+          "intermediate_data": { "tool_uses": [], "tool_responses": [] }
+        }
+      ],
+      "session_input": { "app_name": "intake", "user_id": "u-eval", "state": {} }
+    },
+    {
+      "eval_id": "complete_family_premium_economy",
+      "conversation": [
+        {
+          "invocation_id": "intake-3",
+          "user_content": {
+            "role": "user",
+            "parts": [
+              {
+                "text": "Booking for Test Traveler Two (t2@example.com, employee 00002, Sales). SFO to SEA, depart 2026-02-10, return 2026-02-14, premium_economy, internal training. Two adults and one infant."
+              }
+            ]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "{\"traveler\":{\"name\":\"Test Traveler Two\",\"email\":\"t2@example.com\",\"employee_id\":\"00002\",\"department\":\"Sales\"},\"trip\":{\"origin\":\"SFO\",\"destination\":\"SEA\",\"departure_date\":\"2026-02-10\",\"return_date\":\"2026-02-14\",\"passengers\":[{\"count\":2,\"type\":\"adult\"},{\"count\":1,\"type\":\"infant\"}],\"travel_class\":\"premium_economy\",\"trip_purpose\":\"internal_training\"},\"missing_fields\":[],\"ready_for_policy\":true}"
+              }
+            ]
+          },
+          "intermediate_data": { "tool_uses": [], "tool_responses": [] }
+        }
+      ],
+      "session_input": { "app_name": "intake", "user_id": "u-eval", "state": {} }
+    }
+  ]
+}

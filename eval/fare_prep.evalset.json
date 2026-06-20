@@ -1,0 +1,124 @@
+{
+  "eval_set_id": "fare_prep_baseline",
+  "name": "fare_prep baseline",
+  "description": "fare_prep reads {intake_output} from session state and calls build_fare_request exactly once with the trip's origin/destination/date/class/passengers. Graded primarily on the tool trajectory (deterministic inputs); the derived fare_request numbers depend on the run date, so response_match has a lenient threshold.",
+  "eval_cases": [
+    {
+      "eval_id": "domestic_single_adult",
+      "conversation": [
+        {
+          "invocation_id": "prep-1",
+          "user_content": {
+            "role": "user",
+            "parts": [{ "text": "Prepare the fare request for this trip." }]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "build_fare_request",
+                "args": {
+                  "origin": "JFK",
+                  "destination": "LAX",
+                  "departure_date": "2026-09-15",
+                  "travel_class": "economy",
+                  "passengers": [{ "count": 1, "type": "adult" }]
+                }
+              }
+            ],
+            "tool_responses": []
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "fare_prep",
+        "user_id": "u-eval",
+        "state": {
+          "intake_output": {
+            "traveler": { "name": "Test Traveler", "email": "test.traveler@example.com", "employee_id": "00001", "department": "Engineering" },
+            "trip": { "origin": "JFK", "destination": "LAX", "departure_date": "2026-09-15", "return_date": "2026-09-20", "passengers": [{ "count": 1, "type": "adult" }], "travel_class": "economy", "trip_purpose": "client_meeting" },
+            "missing_fields": [],
+            "ready_for_policy": true
+          }
+        }
+      }
+    },
+    {
+      "eval_id": "international_mixed_pax",
+      "conversation": [
+        {
+          "invocation_id": "prep-2",
+          "user_content": {
+            "role": "user",
+            "parts": [{ "text": "Prepare the fare request for this trip." }]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "build_fare_request",
+                "args": {
+                  "origin": "JFK",
+                  "destination": "LHR",
+                  "departure_date": "2026-07-15",
+                  "travel_class": "economy",
+                  "passengers": [{ "count": 2, "type": "adult" }, { "count": 1, "type": "child" }]
+                }
+              }
+            ],
+            "tool_responses": []
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "fare_prep",
+        "user_id": "u-eval",
+        "state": {
+          "intake_output": {
+            "traveler": { "name": "Test Traveler", "email": "test.traveler@example.com", "employee_id": "00001", "department": "Engineering" },
+            "trip": { "origin": "JFK", "destination": "LHR", "departure_date": "2026-07-15", "return_date": "2026-07-25", "passengers": [{ "count": 2, "type": "adult" }, { "count": 1, "type": "child" }], "travel_class": "economy", "trip_purpose": "conference" },
+            "missing_fields": [],
+            "ready_for_policy": true
+          }
+        }
+      }
+    },
+    {
+      "eval_id": "unknown_airport_error_passthrough",
+      "conversation": [
+        {
+          "invocation_id": "prep-3",
+          "user_content": {
+            "role": "user",
+            "parts": [{ "text": "Prepare the fare request for this trip." }]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "build_fare_request",
+                "args": {
+                  "origin": "JFK",
+                  "destination": "ZZZ",
+                  "departure_date": "2026-09-15",
+                  "travel_class": "economy",
+                  "passengers": [{ "count": 1, "type": "adult" }]
+                }
+              }
+            ],
+            "tool_responses": []
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "fare_prep",
+        "user_id": "u-eval",
+        "state": {
+          "intake_output": {
+            "traveler": { "name": "Test Traveler", "email": "test.traveler@example.com", "employee_id": "00001", "department": "Engineering" },
+            "trip": { "origin": "JFK", "destination": "ZZZ", "departure_date": "2026-09-15", "return_date": "2026-09-20", "passengers": [{ "count": 1, "type": "adult" }], "travel_class": "economy", "trip_purpose": "other" },
+            "missing_fields": [],
+            "ready_for_policy": true
+          }
+        }
+      }
+    }
+  ]
+}
