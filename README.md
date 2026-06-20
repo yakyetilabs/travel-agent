@@ -5,9 +5,18 @@ It pre-qualifies a corporate travel request: it collects the trip, prices it via
 separate fare-engine microservice, applies corporate policy, and returns a single
 structured decision.
 
-This is the **orchestrator** half of a two-repo system. The pricing half is a
-standalone Go A2A microservice (`travel-fare-engine`) called over A2A as a remote
-Cloud Run service.
+This is the **orchestrator** half of a two-repo system (and the best place to
+start). The pricing half is a standalone Go A2A microservice
+(`travel-fare-engine`) called over A2A as a remote Cloud Run service.
+
+> **📦 Two-repo system — clone both:**
+> - 🧭 **This repo (start here):** [yakyetilabs/travel-agent](https://github.com/yakyetilabs/travel-agent)
+> - ⚙️ **Pricing engine:** [yakyetilabs/travel-fare-engine](https://github.com/yakyetilabs/travel-fare-engine)
+>
+> **New here?** Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the two
+> fit together, [docs/DEPLOY.md](docs/DEPLOY.md) to stand up your own, and
+> [docs/LESSONS.md](docs/LESSONS.md) for the gotchas (and the concepts behind
+> them). Cloud gaps/status: [docs/CLOUD-READINESS.md](docs/CLOUD-READINESS.md).
 
 ## Architecture
 
