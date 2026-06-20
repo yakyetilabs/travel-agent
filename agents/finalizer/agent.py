@@ -1,6 +1,6 @@
 from google.adk.agents import LlmAgent
 
-from agents.orchestrator.schemas import TravelQualificationOutput
+from .schemas import TravelQualificationOutput
 
 INSTRUCTION = """\
 You are the orchestrator finalizer. Intake, policy, and the fare engine have
@@ -33,7 +33,7 @@ Never invent values. Never call tools. Never recompute anything.
 
 root_agent = LlmAgent(
     name="orchestrator_finalizer",
-    model="gemini-2.5-pro",
+    model="gemini-2.5-flash",
     instruction=INSTRUCTION,
     output_schema=TravelQualificationOutput,
     output_key="orchestrator_output",

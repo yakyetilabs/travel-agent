@@ -45,7 +45,7 @@ HTTP_CODE="$(curl -s -o /tmp/agent-card.json -w '%{http_code}' "${AUTH_ARGS[@]}"
 # engine is deployed — a common misconfiguration (engine must set HOST_URL).
 if command -v jq >/dev/null 2>&1; then
   CARD_NAME="$(jq -r '.name' /tmp/agent-card.json)"
-  IFACE_URL="$(jq -r '.supportedInterfaces[0].url // empty' /tmp/agent-card.json)"
+  IFACE_URL="$(jq -r '.url // empty' /tmp/agent-card.json)"
   ok "fare engine reachable: ${CARD_NAME} (interface: ${IFACE_URL:-n/a})"
   if [[ "${FARE_ENGINE_URL}" != http://localhost* && "${IFACE_URL}" == http://localhost* ]]; then
     fail "engine card advertises a localhost URL (${IFACE_URL}) but is deployed remotely — set HOST_URL on the engine"
