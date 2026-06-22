@@ -17,16 +17,19 @@ from __future__ import annotations
 
 import math
 from datetime import date, datetime
-from typing import Literal
+from typing import Callable, Literal
 
 # --- Engine boundary vocabulary (DUPLICATED ON PURPOSE) ---------------------
 #
-# These mirror the engine's exported vocabularies (ValidCabinClasses,
-# ValidBookingClasses, ValidRouteTypes, ValidSeasonCodes, ValidPassengerTypes).
-# Per the engine's CLAUDE.md, the duplication is intentional — the two repos must
-# stay independently deployable — and a tripwire test on each side fails if they
-# drift (here: tests/test_contract.py). If you change a value, change it in the
-# engine's schema.go too.
+# These literals and lists mirror the fare engine's own exported vocabularies
+# (ValidCabinClasses, ValidBookingClasses, ValidRouteTypes, ValidSeasonCodes,
+# ValidPassengerTypes). The duplication is deliberate: the orchestration service
+# and the fare engine are deployed as independent services, so they cannot share
+# a single source of truth for these values.
+#
+# To prevent drift, a contract test (see tests/test_contract.py) fails if the
+# two sides ever diverge. When updating these values, you must update the
+# engine's schema.go in lockstep.
 CabinClass = Literal["economy", "premium_economy", "business", "first"]
 BookingClass = Literal["Y", "B", "M", "H", "Q", "G", "K"]
 RouteType = Literal["domestic", "international"]
@@ -74,20 +77,18 @@ _AIRPORTS: dict[str, tuple[float, float, str]] = {
 }
 
 
-def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Great-circle distance in statute miles."""
-    radius_miles = 3958.7613
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
-    a = (
-        math.sin(dphi / 2) ** 2
-        + math.cos(p1) * math.cos(p2) * math.sin(dlambda / 2) ** 2
-    )
-    return 2 * radius_miles * math.asin(math.sqrt(a))
+AirportResolver = Callable[[str], tuple[float, float, str]]
+SeasonCalculator = Callable[[int], SeasonCode]
+BookingClassCalculator = Callable[[int], BookingClass]
 
 
-def _season_for_month(month: int) -> SeasonCode:
+def _default_airport_resolver(iata: str) -> tuple[float, float, str]:
+    if iata not in _AIRPORTS:
+        raise KeyError(iata)
+    return _AIRPORTS[iata]
+
+
+def _default_season_for_month(month: int) -> SeasonCode:
     """Map a departure month to a seasonal pricing tier.
 
     Simplified Northern-Hemisphere leisure-demand calendar:
@@ -102,7 +103,7 @@ def _season_for_month(month: int) -> SeasonCode:
     return "low"
 
 
-def _booking_class_for_advance(advance_days: int) -> BookingClass:
+def _default_booking_class_for_advance(advance_days: int) -> BookingClass:
     """Assign a booking (fare) class from how far ahead the trip is booked.
 
     Booking earlier earns a deeper-discount class; last-minute pays full fare. The
@@ -124,6 +125,146 @@ def _booking_class_for_advance(advance_days: int) -> BookingClass:
     return "Y"
 
 
+# ---------------------------------------------------------------------------
+# Haversine
+# ---------------------------------------------------------------------------
+def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance in statute miles."""
+    radius_miles = 3958.7613
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = (
+        math.sin(dphi / 2) ** 2
+        + math.cos(p1) * math.cos(p2) * math.sin(dlambda / 2) ** 2
+    )
+    # Guard against floating‑point overshoot that would break math.asin.
+    a = min(1.0, a)
+    return 2 * radius_miles * math.asin(math.sqrt(a))
+
+
+# ---------------------------------------------------------------------------
+# Core translator class
+# ---------------------------------------------------------------------------
+class FareRequestTranslator:
+    """Converts human‑friendly trip details into an engine‑compatible fare request.
+
+    Dependencies are injected, enabling easy swapping for testing or production
+    integrations (e.g. a live geocoding service for airports, or a dynamic
+    season‑code feed from revenue management).
+    """
+
+    def __init__(
+        self,
+        airport_resolver: AirportResolver = _default_airport_resolver,
+        season_calculator: SeasonCalculator = _default_season_for_month,
+        booking_class_calculator: BookingClassCalculator = _default_booking_class_for_advance,
+    ):
+        self.resolve_airport = airport_resolver
+        self.season = season_calculator
+        self.booking_class_for = booking_class_calculator
+
+    def translate(
+        self,
+        origin: str,
+        destination: str,
+        departure_date: str,
+        travel_class: str,
+        passengers: list[dict],
+        today: str | None = None,
+    ) -> dict:
+        """Derive the engine's FareQuoteRequest from human-shaped intake fields.
+
+        Returns ``{"ok": True, "fare_request": {...}}`` on success,
+        ``{"ok": False, "error": "...")}`` on any derivation problem.
+        """
+        origin = (origin or "").strip().upper()
+        destination = (destination or "").strip().upper()
+
+        # Airport validation
+        try:
+            olat, olon, ocountry = self.resolve_airport(origin)
+        except (KeyError, Exception):
+            return {"ok": False, "error": f"unknown origin airport {origin!r}"}
+        try:
+            dlat, dlon, dcountry = self.resolve_airport(destination)
+        except (KeyError, Exception):
+            return {
+                "ok": False,
+                "error": f"unknown destination airport {destination!r}",
+            }
+
+        if origin == destination:
+            return {"ok": False, "error": "origin and destination are the same airport"}
+
+        if travel_class not in VALID_CABIN_CLASSES:
+            return {"ok": False, "error": f"unknown travel_class {travel_class!r}"}
+
+        # Passengers
+        if not passengers:
+            return {"ok": False, "error": "at least one passenger group is required"}
+        total = 0
+        for grp in passengers:
+            ptype = grp.get("type")
+            count = grp.get("count")
+            if ptype not in VALID_PASSENGER_TYPES:
+                return {"ok": False, "error": f"unknown passenger type {ptype!r}"}
+            if not isinstance(count, int) or count < 1 or count > 9:
+                return {"ok": False, "error": f"passenger count {count!r} must be 1–9"}
+            total += count
+        if total > MAX_TOTAL_PASSENGERS:
+            return {
+                "ok": False,
+                "error": f"total passenger count {total} exceeds engine maximum {MAX_TOTAL_PASSENGERS}",
+            }
+
+        # Dates
+        try:
+            dep = datetime.strptime(departure_date, "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            return {"ok": False, "error": "departure_date must be YYYY-MM-DD"}
+        ref = date.today()
+        if today is not None:
+            try:
+                ref = datetime.strptime(today, "%Y-%m-%d").date()
+            except (ValueError, TypeError):
+                return {"ok": False, "error": "today must be YYYY-MM-DD"}
+
+        advance_days = (dep - ref).days
+        if advance_days < 0:
+            return {"ok": False, "error": "departure_date is in the past"}
+        advance_days = min(advance_days, MAX_ADVANCE_PURCHASE_DAYS)
+
+        # Distance and route type
+        raw_miles = _haversine_miles(olat, olon, dlat, dlon)
+        distance = int(round(raw_miles))
+        distance = max(MIN_DISTANCE_MILES, min(distance, MAX_DISTANCE_MILES))
+        route_type: RouteType = "domestic" if ocountry == dcountry else "international"
+
+        season = self.season(dep.month)
+        booking_class = self.booking_class_for(advance_days)
+
+        fare_request = {
+            "base_distance_miles": distance,
+            "advance_purchase_days": advance_days,
+            "passengers": [
+                {"count": int(g["count"]), "type": g["type"]} for g in passengers
+            ],
+            "cabin_class": travel_class,
+            "booking_class": booking_class,
+            "route_type": route_type,
+            "season_code": season,
+        }
+        return {"ok": True, "fare_request": fare_request}
+
+
+# ---------------------------------------------------------------------------
+# Module‑level convenience function (backward compatible)
+# ---------------------------------------------------------------------------
+# A default, stateless translator instance that matches the old behaviour exactly.
+_default_translator = FareRequestTranslator()
+
+
 def build_fare_request(
     origin: str,
     destination: str,
@@ -134,89 +275,14 @@ def build_fare_request(
 ) -> dict:
     """Derive the engine's FareQuoteRequest from human-shaped intake fields.
 
-    Args:
-        origin: Origin IATA airport code (e.g. "JFK").
-        destination: Destination IATA airport code (e.g. "LHR").
-        departure_date: Departure date, ISO 8601 "YYYY-MM-DD".
-        travel_class: Cabin class; one of VALID_CABIN_CLASSES.
-        passengers: List of {"count": int, "type": "adult"|"child"|"infant"}.
-        today: Optional reference date "YYYY-MM-DD" for advance-purchase math
-            (defaults to the system date; injectable for deterministic tests).
-
-    Returns:
-        On success, the FareQuoteRequest dict the engine expects, wrapped as
-        ``{"ok": True, "fare_request": {...}}``. On any derivation problem,
-        ``{"ok": False, "error": "<reason>"}`` — callers must surface the error
-        rather than fabricate a fare.
+    This is the public API; it delegates to the default `FareRequestTranslator`.
+    The function signature and return contract remain unchanged from the original.
     """
-    origin = (origin or "").strip().upper()
-    destination = (destination or "").strip().upper()
-
-    if origin not in _AIRPORTS:
-        return {"ok": False, "error": f"unknown origin airport {origin!r}"}
-    if destination not in _AIRPORTS:
-        return {"ok": False, "error": f"unknown destination airport {destination!r}"}
-    if origin == destination:
-        return {"ok": False, "error": "origin and destination are the same airport"}
-
-    if travel_class not in VALID_CABIN_CLASSES:
-        return {"ok": False, "error": f"unknown travel_class {travel_class!r}"}
-
-    # Passengers: validate types/counts and the engine's total cap.
-    if not passengers:
-        return {"ok": False, "error": "at least one passenger group is required"}
-    total = 0
-    for grp in passengers:
-        ptype = grp.get("type")
-        count = grp.get("count")
-        if ptype not in VALID_PASSENGER_TYPES:
-            return {"ok": False, "error": f"unknown passenger type {ptype!r}"}
-        if not isinstance(count, int) or count < 1 or count > 9:
-            return {"ok": False, "error": f"passenger count {count!r} must be 1–9"}
-        total += count
-    if total > MAX_TOTAL_PASSENGERS:
-        return {
-            "ok": False,
-            "error": f"total passenger count {total} exceeds engine maximum {MAX_TOTAL_PASSENGERS}",
-        }
-
-    # Dates.
-    try:
-        dep = datetime.strptime(departure_date, "%Y-%m-%d").date()
-    except (ValueError, TypeError):
-        return {"ok": False, "error": "departure_date must be YYYY-MM-DD"}
-    ref = date.today()
-    if today is not None:
-        try:
-            ref = datetime.strptime(today, "%Y-%m-%d").date()
-        except (ValueError, TypeError):
-            return {"ok": False, "error": "today must be YYYY-MM-DD"}
-
-    advance_days = (dep - ref).days
-    if advance_days < 0:
-        return {"ok": False, "error": "departure_date is in the past"}
-    advance_days = min(advance_days, MAX_ADVANCE_PURCHASE_DAYS)
-
-    # Distance + route type.
-    olat, olon, ocountry = _AIRPORTS[origin]
-    dlat, dlon, dcountry = _AIRPORTS[destination]
-    raw_miles = _haversine_miles(olat, olon, dlat, dlon)
-    distance = int(round(raw_miles))
-    distance = max(MIN_DISTANCE_MILES, min(distance, MAX_DISTANCE_MILES))
-    route_type: RouteType = "domestic" if ocountry == dcountry else "international"
-
-    season = _season_for_month(dep.month)
-    booking_class = _booking_class_for_advance(advance_days)
-
-    fare_request = {
-        "base_distance_miles": distance,
-        "advance_purchase_days": advance_days,
-        "passengers": [
-            {"count": int(g["count"]), "type": g["type"]} for g in passengers
-        ],
-        "cabin_class": travel_class,
-        "booking_class": booking_class,
-        "route_type": route_type,
-        "season_code": season,
-    }
-    return {"ok": True, "fare_request": fare_request}
+    return _default_translator.translate(
+        origin=origin,
+        destination=destination,
+        departure_date=departure_date,
+        travel_class=travel_class,
+        passengers=passengers,
+        today=today,
+    )
