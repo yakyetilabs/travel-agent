@@ -53,12 +53,22 @@ Thresholds live in [`test_config.json`](test_config.json):
 
 ## Eval-driven workflow
 
-Both evalsets are verified baselines: 8/8 cases pass (first verified run
-2026-07-07). CI re-runs them on every push via `tests/test_evals.py` (the
-`evals` job in `.github/workflows/deploy.yml`, keyless Vertex AI auth via WIF)
-and gates deploy on them. If a run fails, decide whether it's a regression
-(fix the agent) or reference drift (update the evalset) — never both in one
-commit.
+Both evalsets are verified baselines: 8/8 cases pass on the Vertex AI path
+(first verified run 2026-07-07). CI re-runs them on every push via
+`tests/test_evals.py` (the `evals` job in `.github/workflows/deploy.yml`,
+keyless Vertex AI auth via WIF) and gates deploy on them. If a run fails,
+decide whether it's a regression (fix the agent) or reference drift (update
+the evalset) — never both in one commit.
+
+Local runs must set the same env CI uses (`GOOGLE_GENAI_USE_VERTEXAI=TRUE`,
+`GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, with ADC) or an API key;
+`tests/test_evals.py` fails fast otherwise, because a credential-less eval run
+can report a vacuous pass.
+
+fare_prep's reference `final_response` values are the deterministic translator's
+own output (the agent's contract is to return the tool result verbatim), so they
+can be regenerated any time by re-running `build_fare_request` with each case's
+`tool_uses[0].args` and writing the JSON back into `final_response`.
 
 ## Data hygiene
 

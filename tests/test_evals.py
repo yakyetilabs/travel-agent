@@ -26,6 +26,29 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(autouse=True)
+def _require_model_credentials() -> None:
+    """Fail loudly instead of passing vacuously when no model is reachable.
+
+    Observed: with no credentials configured, the evaluator can report a pass
+    without any real inference. Run these with the same env CI uses
+    (GOOGLE_GENAI_USE_VERTEXAI=TRUE + project/location + ADC) or an API key.
+    """
+    has_creds = (
+        os.environ.get("GOOGLE_GENAI_USE_VERTEXAI")
+        or os.environ.get("GOOGLE_GENAI_USE_ENTERPRISE")
+        or os.environ.get("GOOGLE_API_KEY")
+        or os.environ.get("GEMINI_API_KEY")
+    )
+    if not has_creds:
+        pytest.fail(
+            "RUN_ADK_EVALS=1 requires model credentials: set "
+            "GOOGLE_GENAI_USE_VERTEXAI=TRUE with GOOGLE_CLOUD_PROJECT/"
+            "GOOGLE_CLOUD_LOCATION (and ADC), or GOOGLE_API_KEY/GEMINI_API_KEY. "
+            "A credential-less eval run is not meaningful."
+        )
+
+
 @pytest.mark.asyncio
 async def test_intake_evalset() -> None:
     from google.adk.evaluation.agent_evaluator import AgentEvaluator
