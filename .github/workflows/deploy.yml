@@ -40,22 +40,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: Install deps
-        run: uv sync
+      - name: Install deps (with adk eval scoring extras)
+        run: uv sync --extra eval
       - id: auth
         name: Authenticate to GCP (WIF)
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOY_SA }}
+      # The `adk eval` CLI always exits 0, even when evals fail, so it cannot
+      # gate this job. tests/test_evals.py wraps the same evalsets in ADK's
+      # AgentEvaluator, which asserts on failures (and auto-discovers
+      # eval/test_config.json). RUN_ADK_EVALS=1 opts in the model-in-the-loop
+      # tests that the default test job skips.
       - name: ADK evals (intake, fare_prep)
         env:
           GOOGLE_GENAI_USE_VERTEXAI: "TRUE"
           GOOGLE_CLOUD_PROJECT: ${{ vars.GCP_PROJECT }}
           GOOGLE_CLOUD_LOCATION: ${{ vars.GCP_REGION }}
-        run: |
-          uv run adk eval agents/intake eval/intake.evalset.json --config_file_path eval/test_config.json
-          uv run adk eval agents/fare_prep eval/fare_prep.evalset.json --config_file_path eval/test_config.json
+          RUN_ADK_EVALS: "1"
+        run: uv run pytest tests/test_evals.py -v
 
   deploy:
     needs: [test, evals]

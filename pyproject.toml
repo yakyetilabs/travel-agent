@@ -18,6 +18,14 @@ dependencies = [
     "uvicorn>=0.49.0",
 ]
 
+[project.optional-dependencies]
+# Scoring deps for `adk eval` (ROUGE etc.). Installed by the CI evals job and
+# for local eval runs via `uv sync --extra eval`; deliberately NOT a main
+# dependency so the Cloud Run image stays lean.
+eval = [
+    "google-adk[eval]>=2.0.0,<3.0.0",
+]
+
 [tool.uv]
 package = false
 

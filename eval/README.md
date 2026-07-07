@@ -6,6 +6,9 @@ pinned separately by the Go eval harness in the `travel-fare-engine` repo.
 
 ## Run
 
+The scoring dependencies are an optional extra; install once with
+`uv sync --extra eval`.
+
 ```bash
 adk eval agents/intake    eval/intake.evalset.json    --config_file_path eval/test_config.json
 adk eval agents/fare_prep eval/fare_prep.evalset.json --config_file_path eval/test_config.json
@@ -15,6 +18,16 @@ The `--config_file_path` flag is required: the `adk eval` CLI does **not**
 auto-discover `test_config.json` from the evalset's folder (only the pytest
 `AgentEvaluator` API does). Without it the CLI silently grades with the ADK
 defaults (`response_match_score: 0.8`) instead of our deliberate thresholds.
+
+The CLI is for local inspection only: it always exits 0, even when evals fail,
+so it cannot gate anything.
+The enforced path is [`tests/test_evals.py`](../tests/test_evals.py), which wraps
+the same evalsets in `AgentEvaluator` (asserts on failures, auto-discovers the
+config) and runs when `RUN_ADK_EVALS=1`:
+
+```bash
+RUN_ADK_EVALS=1 uv run pytest tests/test_evals.py -v
+```
 
 Thresholds live in [`test_config.json`](test_config.json):
 
@@ -40,13 +53,12 @@ Thresholds live in [`test_config.json`](test_config.json):
 
 ## Eval-driven workflow
 
-These files are committed **baselines**, not verified pass rates — they were
-authored against the ADK 2.0 evalset schema but have not been run here (no model
-credentials in this environment). CI runs both evalsets (the `evals` job in
-`.github/workflows/deploy.yml`, keyless Vertex AI auth via WIF) and gates deploy
-on them; the first CI run is the verified baseline. If a run fails, decide
-whether it's a regression (fix the agent) or reference drift (update the evalset) —
-never both in one commit.
+Both evalsets are verified baselines: 8/8 cases pass (first verified run
+2026-07-07). CI re-runs them on every push via `tests/test_evals.py` (the
+`evals` job in `.github/workflows/deploy.yml`, keyless Vertex AI auth via WIF)
+and gates deploy on them. If a run fails, decide whether it's a regression
+(fix the agent) or reference drift (update the evalset) — never both in one
+commit.
 
 ## Data hygiene
 

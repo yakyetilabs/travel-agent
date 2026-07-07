@@ -74,8 +74,11 @@ real addresses, or anything that resembles real PII. This is non-negotiable.
 - fare_engine is a separate Go service; see its repo. Point `FARE_ENGINE_URL`
   in `.env` at the deployed Cloud Run URL (or `http://localhost:8081` for local dev).
 - Run evals: `adk eval agents/<name> eval/<name>.evalset.json --config_file_path eval/test_config.json`
-  (the flag is required — the CLI does not auto-discover test_config.json; without
-  it you get ADK's default thresholds, not ours)
+  (needs `uv sync --extra eval` once; the flag is required — the CLI does not
+  auto-discover test_config.json; without it you get ADK's default thresholds, not ours).
+  GOTCHA: the `adk eval` CLI always exits 0, even when evals fail — never use it
+  as a gate. The enforced gate is `RUN_ADK_EVALS=1 uv run pytest tests/test_evals.py`
+  (AgentEvaluator asserts on failures and DOES auto-discover the config).
 - Deploy: `gcloud run deploy travel-prequal --source .`
 
 ## Don't do this
