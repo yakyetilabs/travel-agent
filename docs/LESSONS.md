@@ -82,9 +82,11 @@ structured-output mode, which **disables tool calling and `transfer_to_agent`**.
   `output_schema`). This is what `pricing`, `policy`, and `fare_prep` do.
 - A final agent with `output_schema` (no tools) validates the final shape.
 
-**Concept.** This is *why* the engine has a **two-agent pipeline** (pricing →
-formatter) and the orchestrator ends in a **finalizer**. The architecture is
-shaped by this constraint, not by preference.
+**Concept.** This is *why* the orchestrator ends in a **finalizer**, and why the
+engine's v1 pipeline was pricing → formatter. (The engine has since replaced the
+formatter with a deterministic passthrough — fare integrity beat schema
+enforcement; see engine DECISIONS.md §6 — but the constraint shaped the split.)
+The architecture is shaped by this constraint, not by preference.
 
 ### 5. Circular import when an ADK multi-agent app loads
 

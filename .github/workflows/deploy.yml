@@ -25,8 +25,40 @@ jobs:
       - name: Tests (unit + contract tripwire)
         run: uv run pytest -q
 
-  deploy:
+  evals:
+    # ADK evals are model-in-the-loop (Vertex AI via WIF), so they cannot run on
+    # forked PRs, which don't get id-token permissions. The `adk eval` CLI does
+    # NOT auto-discover eval/test_config.json (only the pytest AgentEvaluator
+    # does), so the config must be passed explicitly — without it the CLI grades
+    # response_match at 0.8 instead of our deliberate 0.5. The committed
+    # evalsets get their first verified baseline here (see eval/README.md): if a
+    # run fails, decide agent regression vs reference drift — never fix both in
+    # one commit (CLAUDE.md).
     needs: test
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install deps
+        run: uv sync
+      - id: auth
+        name: Authenticate to GCP (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - name: ADK evals (intake, fare_prep)
+        env:
+          GOOGLE_GENAI_USE_VERTEXAI: "TRUE"
+          GOOGLE_CLOUD_PROJECT: ${{ vars.GCP_PROJECT }}
+          GOOGLE_CLOUD_LOCATION: ${{ vars.GCP_REGION }}
+        run: |
+          uv run adk eval agents/intake eval/intake.evalset.json --config_file_path eval/test_config.json
+          uv run adk eval agents/fare_prep eval/fare_prep.evalset.json --config_file_path eval/test_config.json
+
+  deploy:
+    needs: [test, evals]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:

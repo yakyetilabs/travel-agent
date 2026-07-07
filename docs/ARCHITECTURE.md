@@ -1,4 +1,4 @@
-# System Architecture — Travel Pre-Qualification
+# System Architecture — Travel Pre-Trip Approval
 
 How the two repositories work together **as currently implemented**. This is the
 end-to-end view; each repo's own `README.md` covers its internals.
@@ -32,10 +32,10 @@ flowchart LR
     subgraph ENGINE[travel-fare-engine  ·  Cloud Run]
         direction TB
         PR[pricing LLM<br/>+ compute_fare tool] --> CALC[fare.Calculate<br/>pure Go]
-        CALC --> FMT[formatter LLM<br/>+ output_schema]
+        CALC --> FMT[quote_passthrough<br/>deterministic, no LLM]
     end
 
-    F -->|TravelQualificationOutput| U
+    F -->|PreTripApprovalOutput| U
 ```
 
 The orchestrator is a single `SequentialAgent` (`agents/orchestrator/agent.py`)
@@ -53,16 +53,33 @@ intake → fare_prep → fare_engine → policy → finalizer
 
 The two systems speak different languages on purpose:
 
-| Concept        | Human / intake terms            | Engine / pricing terms                          |
-| -------------- | ------------------------------- | ----------------------------------------------- |
-| Where          | `origin`, `destination` (IATA)  | `base_distance_miles`, `route_type`             |
-| When           | `departure_date`, `return_date` | `advance_purchase_days`, `season_code`          |
-| What seat      | `travel_class` (cabin)          | `cabin_class` **+** `booking_class` (fare class) |
+| Concept        | Human / intake terms                  | Engine / pricing terms                          |
+| -------------- | ------------------------------------- | ----------------------------------------------- |
+| Journey shape  | `trip_type` (one-way / round trip)    | `journey_type` + one `fare_component` per leg   |
+| Where          | `origin`, `destination` (IATA)        | `base_distance_miles`, `route_type`             |
+| When           | `departure_date`, `return_date`       | per-leg `advance_purchase_days`, `season_code`  |
+| What seat      | `travel_class` (cabin)                | `cabin_class` **+** per-leg `booking_class` (fare class) |
 
 `fare_prep` is the **translation layer** between them. The engine's own design
 deliberately refuses to know about airports or dates-as-dates ("the engine never
 knows actual airports"), so the orchestrator must derive the pricing inputs. That
-derivation is `tools/fare_request.py` — pure, deterministic Python.
+derivation is `tools/fare_request.py` — pure, deterministic Python. A round trip
+becomes two directional fare components, each priced from its own travel date
+(its own season, advance-purchase tier, and booking class); the engine sums the
+components into the journey totals.
+
+### Glossary (industry terms behind the field names)
+
+- **travel_class vs cabin_class** - the same concept in two vocabularies.
+  Intake speaks the traveler's language (`travel_class`); the pricing contract speaks the airline's (`cabin_class`).
+  The split is intentional, not an oversight: the translator maps one to the other so neither side leaks its vocabulary into the other (see the `tools/fare_request.py` docstring).
+- **booking_class** - the fare class within a cabin, industry name RBD (Reservation Booking Designator): `Y B M H Q G K`.
+  One cabin sells under many booking classes at different prices and restrictions; this is why the contract needs both fields.
+- **Passenger types** - `adult`, `child`, `infant` correspond to the industry PTC codes ADT/CHD/INF.
+  An infant is a lap infant: no seat, priced at 10% of the adult base, at most one per adult.
+- **Fare component / fare construction** - a directional priced unit of a journey; a round trip is the sum of an outbound and a return component.
+- **Fare basis code** - the compact code (e.g. `MLXNN1N`) encoding a component's pricing conditions.
+- **Fare hold** - the short window (`expires_at`) during which a quote is intended to be honored.
 
 `policy` runs **after** the engine so its budget rule can compare against the real
 quoted `total_fare` instead of guessing before a price exists.
@@ -77,10 +94,10 @@ substitution reads it.
 | Stage          | Reads                                  | Does                                                                                          | Writes (`output_key`) |
 | -------------- | -------------------------------------- | -------------------------------------------------------------------------------------------- | --------------------- |
 | **intake**     | user message                           | Parses free text → structured trip; lists `missing_fields`; sets `ready_for_policy`.          | `intake_output`       |
-| **fare_prep**  | `{intake_output}`                      | Calls `build_fare_request(...)` → derives distance, route, season, advance days, booking class.| `fare_request`        |
-| **fare_engine**| `fare_request` (in conversation)       | A2A call to the Go service; its `pricing`→`formatter` pipeline returns a `FareQuote`.          | — (reply in history)  |
-| **policy**     | `{intake_output}` + FareQuote in history | Calls `check_budget` (uses `total_fare`), `check_travel_class`, `check_advance_purchase`, `check_max_trip_duration`. | `policy_decision`     |
-| **finalizer**  | `{intake_output}`, `{policy_decision}`, FareQuote in history | Assembles `TravelQualificationOutput`; derives `final_decision`. No tools, no recompute.       | `orchestrator_output` |
+| **fare_prep**  | `{intake_output}`                      | Calls `build_fare_request(...)` → derives the journey's fare components (distance, route, and per-leg season, advance days, booking class).| `fare_request`        |
+| **fare_engine**| `fare_request` (in conversation)       | A2A call to the Go service; its `pricing`→`quote_passthrough` pipeline returns the `FareQuote` verbatim from the tool. | — (reply in history)  |
+| **policy**     | `{intake_output}` + FareQuote in history | Calls `check_budget` (uses `total_fare`), `check_travel_class`, `check_advance_purchase`, `check_max_trip_duration`; each returns a `pass`/`needs_approval`/`fail` verdict. | `policy_decision`     |
+| **finalizer**  | `{intake_output}`, `{policy_decision}`, FareQuote in history | Assembles `PreTripApprovalOutput`; derives `final_decision`. No tools, no recompute.       | `orchestrator_output` |
 
 ### `final_decision` logic (in the finalizer prompt)
 
@@ -91,8 +108,20 @@ policy_decision.status == needs_review → "needs_review"
 otherwise                        → "approved"
 ```
 
-A `business`/`first` cabin additionally sets `requires_manager_approval=True` on
-the policy decision (an approved trip can still need sign-off).
+Every policy tool returns a three-way verdict: `pass`, `needs_approval`, or `fail`
+(`agents/policy/rules.py` is the canonical decision rule).
+Any `fail` denies the trip; otherwise any `needs_approval` yields `needs_review`
+with `requires_manager_approval=True` - real pre-trip approval escalates
+out-of-policy requests to a manager rather than flat-denying them.
+A `business` cabin escalates; a `first` cabin is prohibited outright.
+A missing fare quote is itself a `needs_approval` verdict from `check_budget`
+(the budget cannot be verified), so an engine failure escalates the trip and can
+never produce an unverified approval.
+The thresholds (the $2000 trip budget cap, allowed cabins, 7-day advance-purchase
+minimum, 14-day duration limit) are module constants in `tools/policy.py`; the
+tools take only trip and fare data, so the LLM cannot pass - or weaken - a
+threshold. The budget cap applies to the quoted journey total: all legs, all
+passengers on the booking, guest travelers included.
 
 ---
 
@@ -135,14 +164,21 @@ degrade gracefully rather than throwing:
 
 - **Intake incomplete** → `ready_for_policy=False`. Downstream stages still run but
   produce empty/error results; the finalizer short-circuits to `incomplete`.
-- **Unpriceable trip** (unknown airport, past date, >9 passengers) → `fare_prep`'s
+- **Unpriceable trip** (unknown airport, past date, >9 seated passengers, more
+  lap infants than adults) → `fare_prep`'s
   tool returns `{"ok": false, "error": ...}`; no valid `FareQuote` appears; the
-  finalizer sets `fare_quote = null`. `policy` skips the budget check and notes the
-  fare was unavailable.
+  finalizer sets `fare_quote = null`.
 - **Engine rejects the request** → its `Calculate()` validation error surfaces as
   the A2A reply; same `null` fare path. *(By construction `build_fare_request` only
   emits engine-valid requests — distance clamped to 100–10000, booking class chosen
   to satisfy advance-purchase minimums — so this should be rare.)*
+- **Engine unreachable or times out** → the A2A call yields an error event and no
+  `FareQuote`; same `null` fare path.
+- **Whenever no `FareQuote` exists**, `check_budget` runs with no fare and returns
+  a `needs_approval` verdict ("budget cannot be verified"), so the trip escalates
+  to `needs_review` with `requires_manager_approval=true`.
+  A missing mandatory check can never count as a pass: an engine outage escalates
+  to a human, it does not auto-approve.
 
 ---
 

@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 FinalDecision = Literal["approved", "denied", "needs_review", "incomplete"]
 
 
-class TravelQualificationOutput(BaseModel):
+class PreTripApprovalOutput(BaseModel):
     traveler: dict
     trip: dict
     policy_decision: dict | None = None

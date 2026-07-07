@@ -142,7 +142,7 @@ curl -s -X POST http://127.0.0.1:8080/run -H "Content-Type: application/json" -d
   | jq -r '.[-1].content.parts[].text // empty'
 ```
 
-Success = a `TravelQualificationOutput` with a populated `fare_quote` (base fare,
+Success = a `PreTripApprovalOutput` with a populated `fare_quote` (base fare,
 taxes, total) and a `final_decision`.
 
 ## 9. (Optional) Keyless CI/CD with GitHub Actions

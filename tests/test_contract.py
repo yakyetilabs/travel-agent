@@ -22,18 +22,23 @@ import pytest
 from tools.fare_request import (
     VALID_BOOKING_CLASSES,
     VALID_CABIN_CLASSES,
+    VALID_DIRECTIONS,
+    VALID_JOURNEY_TYPES,
     VALID_PASSENGER_TYPES,
     VALID_ROUTE_TYPES,
     VALID_SEASON_CODES,
 )
 
-# The agreed contract. Must equal the engine's exported slices in schema.go.
+# The agreed contract (v2: journey of directional fare components).
+# Must equal the engine's exported slices in schema.go.
 EXPECTED = {
     "cabin_class": ["economy", "premium_economy", "business", "first"],
     "booking_class": ["Y", "B", "M", "H", "Q", "G", "K"],
     "route_type": ["domestic", "international"],
     "season_code": ["low", "shoulder", "peak"],
     "passenger_type": ["adult", "child", "infant"],
+    "journey_type": ["one_way", "round_trip"],
+    "direction": ["outbound", "return"],
 }
 
 ACTUAL = {
@@ -42,6 +47,8 @@ ACTUAL = {
     "route_type": VALID_ROUTE_TYPES,
     "season_code": VALID_SEASON_CODES,
     "passenger_type": VALID_PASSENGER_TYPES,
+    "journey_type": VALID_JOURNEY_TYPES,
+    "direction": VALID_DIRECTIONS,
 }
 
 
@@ -71,8 +78,13 @@ def test_matches_engine_agent_card() -> None:
     card = json.loads(card_path.read_text())
     props = card["skills"][0]["inputSchema"]["properties"]
 
+    assert props["journey_type"]["enum"] == VALID_JOURNEY_TYPES
     assert props["cabin_class"]["enum"] == VALID_CABIN_CLASSES
-    assert props["booking_class"]["enum"] == VALID_BOOKING_CLASSES
     assert props["route_type"]["enum"] == VALID_ROUTE_TYPES
-    assert props["season_code"]["enum"] == VALID_SEASON_CODES
     assert props["passengers"]["items"]["properties"]["type"]["enum"] == VALID_PASSENGER_TYPES
+
+    # Per-component vocabularies live one level down in fare_components.items.
+    comp_props = props["fare_components"]["items"]["properties"]
+    assert comp_props["direction"]["enum"] == VALID_DIRECTIONS
+    assert comp_props["booking_class"]["enum"] == VALID_BOOKING_CLASSES
+    assert comp_props["season_code"]["enum"] == VALID_SEASON_CODES

@@ -12,6 +12,8 @@ from pydantic import BaseModel, Field
 from tools.fare_request import (
     BookingClass,
     CabinClass,
+    Direction,
+    JourneyType,
     PassengerType,
     RouteType,
     SeasonCode,
@@ -23,16 +25,33 @@ class PassengerGroup(BaseModel):
     type: PassengerType
 
 
-class FareRequest(BaseModel):
-    """Mirror of the engine's FareQuoteRequest (schema.go)."""
+class FareComponent(BaseModel):
+    """One directional priced unit of the journey (one leg).
 
+    Each component carries its own advance-purchase days, booking class, and
+    season code because the two legs of a round trip can genuinely price in
+    different discount tiers and seasons.
+    """
+
+    direction: Direction
     base_distance_miles: int = Field(ge=100, le=10000)
     advance_purchase_days: int = Field(ge=0, le=365)
-    passengers: list[PassengerGroup] = Field(min_length=1)
-    cabin_class: CabinClass
     booking_class: BookingClass
-    route_type: RouteType
     season_code: SeasonCode
+
+
+class FareRequest(BaseModel):
+    """Mirror of the engine's FareQuoteRequest (schema.go).
+
+    A journey priced as the sum of directional fare components: one component
+    (outbound) for a one_way journey, two (outbound, return) for a round_trip.
+    """
+
+    journey_type: JourneyType
+    cabin_class: CabinClass
+    route_type: RouteType
+    passengers: list[PassengerGroup] = Field(min_length=1)
+    fare_components: list[FareComponent] = Field(min_length=1, max_length=2)
 
 
 class FarePrepOutput(BaseModel):

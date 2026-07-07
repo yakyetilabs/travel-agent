@@ -1,12 +1,18 @@
 """Deterministic translation from human-shaped intake into the fare engine's
 A2A boundary contract. No LLM calls (deterministic-tool rule, see CLAUDE.md).
 
-The traveler (and the intake agent) speak in human terms: airports, dates, cabin.
-The fare engine speaks in pricing terms: distance in miles, advance-purchase days,
-route type, season, booking class. The engine's own CLAUDE.md is explicit that the
+The traveler (and the intake agent) speak in human terms: airports, dates, cabin,
+one-way or round trip. The fare engine speaks in pricing terms: a journey made of
+directional fare components, each with distance in miles, advance-purchase days,
+season, and booking class. The engine's own CLAUDE.md is explicit that the
 *orchestrator* owns this translation ("Orchestrator derives base_distance_miles
 from airports"; "the engine never knows actual airports"; "orchestrator determines
 season_code from date"). This module is that translation layer.
+
+A one_way trip becomes a single outbound fare component. A round_trip becomes an
+outbound plus a return component, each derived from its own travel date — so the
+two legs can genuinely land in different seasons, advance-purchase tiers, and
+booking classes, exactly as real fare construction prices them.
 
 Everything here is a static stand-in, mirroring the engine's own "static tables
 stand in for real ATPCO data" stance — a real deployment would swap the airport
@@ -23,9 +29,10 @@ from typing import Callable, Literal
 #
 # These literals and lists mirror the fare engine's own exported vocabularies
 # (ValidCabinClasses, ValidBookingClasses, ValidRouteTypes, ValidSeasonCodes,
-# ValidPassengerTypes). The duplication is deliberate: the orchestration service
-# and the fare engine are deployed as independent services, so they cannot share
-# a single source of truth for these values.
+# ValidPassengerTypes, ValidJourneyTypes, ValidDirections). The duplication is
+# deliberate: the orchestration service and the fare engine are deployed as
+# independent services, so they cannot share a single source of truth for these
+# values.
 #
 # To prevent drift, a contract test (see tests/test_contract.py) fails if the
 # two sides ever diverge. When updating these values, you must update the
@@ -35,19 +42,25 @@ BookingClass = Literal["Y", "B", "M", "H", "Q", "G", "K"]
 RouteType = Literal["domestic", "international"]
 SeasonCode = Literal["low", "shoulder", "peak"]
 PassengerType = Literal["adult", "child", "infant"]
+JourneyType = Literal["one_way", "round_trip"]
+Direction = Literal["outbound", "return"]
 
 VALID_CABIN_CLASSES: list[str] = ["economy", "premium_economy", "business", "first"]
 VALID_BOOKING_CLASSES: list[str] = ["Y", "B", "M", "H", "Q", "G", "K"]
 VALID_ROUTE_TYPES: list[str] = ["domestic", "international"]
 VALID_SEASON_CODES: list[str] = ["low", "shoulder", "peak"]
 VALID_PASSENGER_TYPES: list[str] = ["adult", "child", "infant"]
+VALID_JOURNEY_TYPES: list[str] = ["one_way", "round_trip"]
+VALID_DIRECTIONS: list[str] = ["outbound", "return"]
 
 # Engine numeric bounds (schema.go / DECISIONS.md §3). We clamp/validate to these
 # so we never hand the engine a request it will reject.
 MIN_DISTANCE_MILES = 100
 MAX_DISTANCE_MILES = 10000
 MAX_ADVANCE_PURCHASE_DAYS = 365
-MAX_TOTAL_PASSENGERS = 9
+# Cap on SEATED passengers (adults + children); lap infants do not occupy a
+# seat and are instead limited to one per adult (engine DECISIONS.md §4).
+MAX_SEATED_PASSENGERS = 9
 
 # --- Static airport table ---------------------------------------------------
 # IATA code -> (latitude, longitude, ISO country). A small but real set; unknown
@@ -171,9 +184,12 @@ class FareRequestTranslator:
         departure_date: str,
         travel_class: str,
         passengers: list[dict],
+        trip_type: str,
+        return_date: str | None = None,
         today: str | None = None,
     ) -> dict:
-        """Derive the engine's FareQuoteRequest from human-shaped intake fields.
+        """Derive the engine's FareQuoteRequest (a journey of directional fare
+        components) from human-shaped intake fields.
 
         Returns ``{"ok": True, "fare_request": {...}}`` on success,
         ``{"ok": False, "error": "...")}`` on any derivation problem.
@@ -184,11 +200,11 @@ class FareRequestTranslator:
         # Airport validation
         try:
             olat, olon, ocountry = self.resolve_airport(origin)
-        except (KeyError, Exception):
+        except Exception:
             return {"ok": False, "error": f"unknown origin airport {origin!r}"}
         try:
             dlat, dlon, dcountry = self.resolve_airport(destination)
-        except (KeyError, Exception):
+        except Exception:
             return {
                 "ok": False,
                 "error": f"unknown destination airport {destination!r}",
@@ -200,10 +216,16 @@ class FareRequestTranslator:
         if travel_class not in VALID_CABIN_CLASSES:
             return {"ok": False, "error": f"unknown travel_class {travel_class!r}"}
 
-        # Passengers
+        if trip_type not in VALID_JOURNEY_TYPES:
+            return {"ok": False, "error": f"unknown trip_type {trip_type!r}"}
+
+        # Passengers. The seat cap counts adults + children only; lap infants
+        # do not occupy a seat but each needs an adult lap (mirrors the engine).
         if not passengers:
             return {"ok": False, "error": "at least one passenger group is required"}
-        total = 0
+        seated = 0
+        adults = 0
+        infants = 0
         for grp in passengers:
             ptype = grp.get("type")
             count = grp.get("count")
@@ -211,11 +233,27 @@ class FareRequestTranslator:
                 return {"ok": False, "error": f"unknown passenger type {ptype!r}"}
             if not isinstance(count, int) or count < 1 or count > 9:
                 return {"ok": False, "error": f"passenger count {count!r} must be 1–9"}
-            total += count
-        if total > MAX_TOTAL_PASSENGERS:
+            if ptype == "infant":
+                infants += count
+            else:
+                seated += count
+                if ptype == "adult":
+                    adults += count
+        if seated > MAX_SEATED_PASSENGERS:
             return {
                 "ok": False,
-                "error": f"total passenger count {total} exceeds engine maximum {MAX_TOTAL_PASSENGERS}",
+                "error": (
+                    f"seated passenger count {seated} (adults + children) "
+                    f"exceeds engine maximum {MAX_SEATED_PASSENGERS}"
+                ),
+            }
+        if infants > adults:
+            return {
+                "ok": False,
+                "error": (
+                    f"infant count {infants} exceeds adult count {adults}: "
+                    "one lap infant per adult"
+                ),
             }
 
         # Dates
@@ -230,30 +268,66 @@ class FareRequestTranslator:
             except (ValueError, TypeError):
                 return {"ok": False, "error": "today must be YYYY-MM-DD"}
 
-        advance_days = (dep - ref).days
-        if advance_days < 0:
+        if (dep - ref).days < 0:
             return {"ok": False, "error": "departure_date is in the past"}
-        advance_days = min(advance_days, MAX_ADVANCE_PURCHASE_DAYS)
 
-        # Distance and route type
+        # Journey shape: travel dates per direction. A one_way trip must not
+        # carry a return date (contradictory input fails loudly rather than
+        # being silently ignored); a round_trip requires one.
+        ret_date: date | None = None
+        if trip_type == "one_way":
+            if return_date:
+                return {
+                    "ok": False,
+                    "error": "return_date provided for a one_way trip",
+                }
+        else:  # round_trip
+            if not return_date:
+                return {
+                    "ok": False,
+                    "error": "return_date is required for a round_trip trip",
+                }
+            try:
+                ret_date = datetime.strptime(return_date, "%Y-%m-%d").date()
+            except (ValueError, TypeError):
+                return {"ok": False, "error": "return_date must be YYYY-MM-DD"}
+            if ret_date < dep:
+                return {"ok": False, "error": "return_date is before departure_date"}
+
+        # Distance and route type (symmetric across directions)
         raw_miles = _haversine_miles(olat, olon, dlat, dlon)
         distance = int(round(raw_miles))
         distance = max(MIN_DISTANCE_MILES, min(distance, MAX_DISTANCE_MILES))
         route_type: RouteType = "domestic" if ocountry == dcountry else "international"
 
-        season = self.season(dep.month)
-        booking_class = self.booking_class_for(advance_days)
+        # One directional fare component per leg, each derived from its own
+        # travel date: its own advance-purchase days, season, and booking class.
+        legs: list[tuple[Direction, date]] = [("outbound", dep)]
+        if ret_date is not None:
+            legs.append(("return", ret_date))
+
+        fare_components = []
+        for direction, travel_date in legs:
+            advance_days = (travel_date - ref).days
+            advance_days = min(advance_days, MAX_ADVANCE_PURCHASE_DAYS)
+            fare_components.append(
+                {
+                    "direction": direction,
+                    "base_distance_miles": distance,
+                    "advance_purchase_days": advance_days,
+                    "booking_class": self.booking_class_for(advance_days),
+                    "season_code": self.season(travel_date.month),
+                }
+            )
 
         fare_request = {
-            "base_distance_miles": distance,
-            "advance_purchase_days": advance_days,
+            "journey_type": trip_type,
+            "cabin_class": travel_class,
+            "route_type": route_type,
             "passengers": [
                 {"count": int(g["count"]), "type": g["type"]} for g in passengers
             ],
-            "cabin_class": travel_class,
-            "booking_class": booking_class,
-            "route_type": route_type,
-            "season_code": season,
+            "fare_components": fare_components,
         }
         return {"ok": True, "fare_request": fare_request}
 
@@ -271,12 +345,15 @@ def build_fare_request(
     departure_date: str,
     travel_class: str,
     passengers: list[dict],
+    trip_type: str,
+    return_date: str | None = None,
     today: str | None = None,
 ) -> dict:
     """Derive the engine's FareQuoteRequest from human-shaped intake fields.
 
     This is the public API; it delegates to the default `FareRequestTranslator`.
-    The function signature and return contract remain unchanged from the original.
+    `trip_type` is "one_way" or "round_trip"; `return_date` is required for
+    round trips and forbidden for one-way trips.
     """
     return _default_translator.translate(
         origin=origin,
@@ -284,5 +361,7 @@ def build_fare_request(
         departure_date=departure_date,
         travel_class=travel_class,
         passengers=passengers,
+        trip_type=trip_type,
+        return_date=return_date,
         today=today,
     )

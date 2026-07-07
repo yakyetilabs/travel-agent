@@ -37,7 +37,10 @@ The orchestrator references the fare_engine via RemoteA2AAgent at
 Eval sets live in eval/<agent>.evalset.json. Run:
 
 ```bash
-adk eval agents/<name> eval/<agent>.evalset.json
+adk eval agents/<name> eval/<agent>.evalset.json --config_file_path eval/test_config.json
 ```
+
+The flag is required: the CLI does not auto-discover eval/test_config.json and
+would otherwise grade with ADK's stricter defaults.
 
 Always create at least 3 eval cases per agent before considering it "done".

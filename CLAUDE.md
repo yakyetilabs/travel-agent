@@ -1,4 +1,4 @@
-# Travel Pre-Qualification Multi-Agent System
+# Travel Pre-Trip Approval Multi-Agent System
 
 ## What this project is
 
@@ -16,7 +16,7 @@ Why this order: `fare_prep` deterministically translates the human-shaped intake
 advance-purchase days, route_type, season_code, booking_class) — see
 `tools/fare_request.py`. The engine prices it, and `policy` runs *after* so its
 budget check can act on the real quoted `total_fare` rather than guessing before a
-fare exists. `finalizer` assembles the structured `TravelQualificationOutput`.
+fare exists. `finalizer` assembles the structured `PreTripApprovalOutput`.
 
 ## Stack
 
@@ -73,7 +73,9 @@ real addresses, or anything that resembles real PII. This is non-negotiable.
 - Launch dev UI: `adk web`
 - fare_engine is a separate Go service; see its repo. Point `FARE_ENGINE_URL`
   in `.env` at the deployed Cloud Run URL (or `http://localhost:8081` for local dev).
-- Run evals: `adk eval agents/<name> eval/<name>.evalset.json`
+- Run evals: `adk eval agents/<name> eval/<name>.evalset.json --config_file_path eval/test_config.json`
+  (the flag is required — the CLI does not auto-discover test_config.json; without
+  it you get ADK's default thresholds, not ours)
 - Deploy: `gcloud run deploy travel-prequal --source .`
 
 ## Don't do this
@@ -92,7 +94,8 @@ real addresses, or anything that resembles real PII. This is non-negotiable.
 ## Eval-driven iteration
 
 Any non-trivial change to an agent's prompt, tools, or model must be
-preceded by `adk eval agents/<name> eval/<name>.evalset.json`. Capture
+preceded by `adk eval agents/<name> eval/<name>.evalset.json
+--config_file_path eval/test_config.json`. Capture
 the baseline, make the change, re-run. If pass rate drops, decide:
 agent regression (fix it) or reference drift (update the evalset).
 Never both in the same commit.

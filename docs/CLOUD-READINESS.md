@@ -79,13 +79,14 @@ Keyless GitHub Actions deploys via **Workload Identity Federation** (no SA keys)
 - [x] Engine workflow (`travel-fare-engine/.github/workflows/deploy.yml`):
       `go vet` + `go test ./...` (unit + tripwire + eval) → deploy → set HOST_URL →
       authenticated smoke test of the agent card.
-- [x] Orchestrator workflow (`.github/workflows/deploy.yml`): `pytest` → resolve
-      engine URL → deploy → authenticated `/list-apps` smoke test.
-- [ ] **You:** push both repos to GitHub, run `setup-wif.sh`, and set the four
-      repo variables it prints (`GCP_PROJECT`, `GCP_REGION`, `GCP_WIF_PROVIDER`,
-      `GCP_DEPLOY_SA`) in each repo.
-- [ ] Optional: add `adk eval` as a gated step once model credentials are wired in
-      CI (the workflows currently gate on unit/contract tests, not model evals).
+- [x] Orchestrator workflow (`.github/workflows/deploy.yml`): `pytest` → ADK
+      evals (Vertex AI via WIF) → resolve engine URL → deploy → authenticated
+      `/list-apps` smoke test. Deploy is gated on tests **and** evals.
+- [ ] **You:** push both repos to GitHub, run `setup-wif.sh` (re-run it if you
+      set it up before the evals job existed — the deployer SA now also needs
+      `roles/aiplatform.user`), and set the four repo variables it prints
+      (`GCP_PROJECT`, `GCP_REGION`, `GCP_WIF_PROVIDER`, `GCP_DEPLOY_SA`) in
+      each repo.
 
 ## 7. Observability & resilience
 

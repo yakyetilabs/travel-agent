@@ -23,3 +23,9 @@ sample_data/real/
 # Tooling caches
 .pytest_cache/
 .ruff_cache/
+
+# ADK local eval history (written by `adk eval` runs)
+.adk/
+
+# Session working notes — never part of the portfolio repo
+HANDOFF.md
