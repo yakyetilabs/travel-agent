@@ -1,6 +1,8 @@
-# Travel Pre-Qualification Multi-Agent Orchestrator
+# Travel Pre-Trip Approval Multi-Agent Orchestrator
 
-The **orchestrator** half of a two-service corporate travel pre-qualification system. It collects trip and traveler information, translates it into the pricing engine’s contract, applies corporate policy against the real fare quote, and assembles a final structured decision. The pricing half — a standalone Go A2A microservice — is in the [`travel-fare-engine](https://github.com/yakyetilabs/travel-fare-engine) repository and is called over A2A as a remote Cloud Run service.
+The **orchestrator** half of a two-service corporate travel pre-trip approval (trip authorization) system.
+It collects trip and traveler information, translates it into the pricing engine's contract, applies corporate policy against the real fare quote, and assembles a final structured authorization decision.
+The pricing half - a standalone Go A2A microservice - is in the [travel-fare-engine](https://github.com/yakyetilabs/travel-fare-engine) repository and is called over A2A as a remote Cloud Run service.
 
 > **📦 Two-repo system — clone both:**
 >
@@ -15,24 +17,66 @@ orchestrator (SequentialAgent)
   ├─ fare_prep   LlmAgent — deterministic translation to engine [deterministic tool]
   ├─ fare_engine RemoteA2aAgent — remote Go service; computes the fare and returns FareQuote
   ├─ policy      LlmAgent — corporate policy checks [tools]
-  └─ finalizer   LlmAgent — assemble TravelQualificationOutput [output_schema]
+  └─ finalizer   LlmAgent — assemble PreTripApprovalOutput [output_schema]
 ```
 
-- **intake** talks to the user and gathers all required traveler + trip fields. It will pause and ask for missing information before letting the workflow continue.
-- **fare_prep** deterministically transforms the human‑shaped trip (airport codes, dates, cabin class) into the engine’s exact `FareQuoteRequest` — distances, advance‑purchase days, route type, season code, booking class. The LLM only calls the tool; the tool does all the derivation.
-- **fare_engine** is a remote A2A service written in Go. It receives a fully‑specified request and returns a `FareQuote`. The engine contains its own LLM guard that refuses to price incomplete requests, but under normal operation that path is never triggered because fare_prep guarantees completeness.
-- **policy** evaluates the real `FareQuote` against budget, travel class, advance purchase, and trip‑duration rules. All checks are deterministic tools; the LLM does not apply policy itself.
-- **finalizer** assembles the final `TravelQualificationOutput` from intake, policy, and fare results.
+- **intake** talks to the user and gathers all required traveler + trip fields, including the trip type (one-way or round trip).
+  When fields are missing it lists them in `missing_fields` and gates the result with `ready_for_policy=false`; downstream stages then degrade explicitly (fare_prep reports the gap, policy returns needs_review, the finalizer marks the outcome `incomplete`) until the traveler supplies the rest.
+  Passenger rules mirror the engine's booking constraints - at most 9 seated passengers (adults + children) and one lap infant per adult - enforced in the intake schema and again by the translator and the engine.
+- **fare_prep** deterministically transforms the human‑shaped trip (airport codes, trip type, dates, cabin class) into the engine's exact `FareQuoteRequest`: a journey of directional **fare components**, one per leg.
+  Each component carries its own distance, advance‑purchase days, season code, and booking class derived from that leg's travel date — a December outbound and a January return genuinely price in different seasons and discount tiers.
+  The LLM only calls the tool; the tool does all the derivation.
+- **fare_engine** is a remote A2A service written in Go. It prices each fare component independently and sums base fares and taxes deterministically into a journey‑level `FareQuote`. The engine contains its own LLM guard that refuses to price incomplete requests, but under normal operation that path is never triggered because fare_prep guarantees completeness.
+- **policy** evaluates the real `FareQuote` against budget, travel class, advance purchase, and trip-duration rules.
+  Every check is a deterministic tool returning a three-way verdict: `pass`, `needs_approval` (a business cabin escalates to a manager), or `fail` (a first cabin, or any hard rule breach, denies the trip).
+  The $2000 budget cap is a trip budget cap: it applies to the quoted journey total - both legs of a round trip, all passengers on the booking, guest travelers included.
+  The duration check applies only to round trips (one-way trips skip it), and a same-day round trip is a legitimate day trip.
+  If the engine returns no quote (outage, timeout, or refusal to price), `check_budget` runs without a fare and returns `needs_approval`, so the trip escalates to a manager instead of being approved with its budget unverified.
+  All thresholds are module constants in [tools/policy.py](tools/policy.py); the LLM neither applies policy itself nor passes thresholds to the tools.
+- **finalizer** assembles the final `PreTripApprovalOutput` from intake, policy, and fare results.
+
+## What this project demonstrates
+
+The travel domain is the vehicle, not the point.
+This system exists to demonstrate six transferable principles for building trustworthy, enterprise-grade agentic systems.
+Swap travel for mortgages or insurance and every one of them still applies.
+
+1. **Deterministic core, LLM shell.**
+   LLMs never compute a number or make a policy decision.
+   They translate human input into structured requests, decide when to call tools, and explain results.
+   Every dollar figure and every approve/deny verdict comes from a pure, unit-tested function ([tools/fare_request.py](tools/fare_request.py), [tools/policy.py](tools/policy.py), and the engine's `Calculate`).
+   This is the trust argument for using LLMs anywhere near money or compliance.
+
+2. **Hard contracts between independently deployable agent services.**
+   Two repos, two languages, no shared library - on purpose.
+   The boundary is a published, discoverable contract (the A2A agent card); the enum vocabularies are duplicated intentionally, and drift is caught mechanically by tripwire tests on both sides ([tests/test_contract.py](tests/test_contract.py) here, `TestTripwire_*` in the engine).
+   This answers the question: how do two teams evolve AI services independently without the integration rotting?
+
+3. **Privacy by construction, not by policy.**
+   The pricing service cannot leak PII because it never receives any - no names, no employee IDs, not even airport codes; only derived numerics such as distance and advance-purchase days.
+   Data minimisation is enforced by the shape of the contract itself, which is what makes the engine's logs safe to retain and audit.
+
+4. **Sequence decisions after facts exist.**
+   The pipeline order is itself a correctness device: policy runs after pricing, so the budget decision consumes the real quoted journey total, never an estimate.
+   Generalised: arrange the workflow so every decision-maker acts on ground truth that already exists.
+
+5. **Typed state as the inter-agent interface.**
+   Agents hand each other validated Pydantic/JSON structures through session state, not free-form prose.
+   The repo also documents the ADK-specific craft this requires: the output_schema-vs-tools trade-off, `output_key` templating, and the finalizer pattern (see [docs/LESSONS.md](docs/LESSONS.md)).
+
+6. **Engineering rigor applied to agents.**
+   Eval sets pin tool trajectories with a baseline-before-change discipline; contract tripwires run in CI; and unit tests prove the translator can never emit a request the engine would reject, across every advance-purchase day of the year ([tests/test_fare_request.py](tests/test_fare_request.py)).
+   That is "make invalid states unrepresentable" applied across a service boundary - alongside keyless CI via Workload Identity Federation and IAM-gated services.
 
 ## The two‑service boundary
 
 The orchestrator and the fare engine communicate **only** through the A2A protocol. The contract is:
 
-- **Input:** `FareQuoteRequest` — validated, derived values only (no PII, no raw airport codes).
-- **Output:** `FareQuote` — a structured JSON object with base fare, taxes, fare rules, and a quote ID.
+- **Input:** `FareQuoteRequest` — validated, derived values only (no PII, no raw airport codes). A journey of one (one‑way) or two (round‑trip) directional fare components.
+- **Output:** `FareQuote` — a structured JSON object with journey totals (base fare, taxes, total), per‑component fare basis codes and fare rules, and a quote ID.
 - **Discovery:** The engine publishes its capabilities via an agent card at `/.well-known/agent-card.json`. The orchestrator reads this card to create the remote agent — no hard‑coded schemas.
 
-All enumerations (cabin class, booking class, route type, season, passenger type) are **duplicated intentionally** between the two repositories. A CI tripwire test (`tests/test_contract.py`) fails the build if the orchestrator’s local enum lists ever drift from the engine’s published card. This duplication is the price of independent deployability: each service can evolve on its own cadence as long as the A2A contract holds.
+All enumerations (cabin class, booking class, route type, season, passenger type, journey type, direction) are **duplicated intentionally** between the two repositories. A CI tripwire test (`tests/test_contract.py`) fails the build if the orchestrator’s local enum lists ever drift from the engine’s published card. This duplication is the price of independent deployability: each service can evolve on its own cadence as long as the A2A contract holds.
 
 **Privacy by construction:** The fare engine never receives names, email addresses, employee IDs, department information, or even airport codes. It operates solely on derived numeric fields (distance in miles, passenger counts, advance‑purchase days). This boundary enforces data minimisation and makes the engine’s logs safe to retain and audit.
 
@@ -74,8 +118,8 @@ adk web        # then open http://localhost:8000 and pick "orchestrator"
 
 ```bash
 pytest                                      # unit tests + contract tripwire
-adk eval agents/intake   eval/intake.evalset.json
-adk eval agents/fare_prep eval/fare_prep.evalset.json
+adk eval agents/intake   eval/intake.evalset.json    --config_file_path eval/test_config.json
+adk eval agents/fare_prep eval/fare_prep.evalset.json --config_file_path eval/test_config.json
 ```
 
 - **Contract tripwire:** tests/test_contract.py reads the engine’s agent card and asserts the orchestrator’s expected enums match. Any drift breaks the build immediately.
@@ -94,18 +138,18 @@ The orchestrator’s runtime service account must hold `roles/run.invoker` on th
 
 - **Stateless orchestrator** — no session affinity, scales horizontally.
 - **Pinned contract** — enum vocabularies duplicated and tripwire‑tested.
-- **Deterministic translation** — build_fare_request computes distances, advance days, booking class, and season without an LLM.
+- **Deterministic translation** — build_fare_request derives the journey's fare components (distance, advance days, booking class, season, per leg) without an LLM.
 - **A2A discovery** — the remote engine is configured via its agent card, not hard‑coded.
 - **Eval harness** — intake and fare_prep evals with expected tool trajectories.
-- **CI/CD** — PR checks include unit tests, tripwire, and evals (on agent‑relevant paths); merge deploys via Cloud Build.
+- **CI/CD** — PR checks run unit tests, the contract tripwire, and the ADK evals (model‑in‑the‑loop on Vertex AI, keyless WIF auth); merge to main deploys to Cloud Run (the source build runs in Cloud Build) with deploy gated on tests **and** evals.
 
 ## Known gaps
 
 - **No persistence.** Quotes and decisions are returned to the caller but not stored. A production system would persist the full decision in a database for compliance and auditing.
-- **No audit log.** Every qualification should be recorded with inputs, outputs, and decision timestamps in tamper‑evident storage.
+- **No audit log.** Every authorization decision should be recorded with inputs, outputs, and decision timestamps in tamper‑evident storage.
 - **Simplified fare engine.** The pricing engine uses a small set of hard‑coded tables. A real deployment would integrate with live ATPCO fares, corporate negotiated rates, or a GDS.
 - **No automated rollback.** Cloud Run’s revision model keeps the previous version serving on failure, but the pipeline does not automatically revert or alert on smoke‑test failure.
-- **Rate‑lock not honored.** Quote IDs are returned with an expiration, but there is no mechanism to guarantee the same fare if the user returns within the window.
+- **Fare hold not honored.** Quote IDs are returned with an expiration (the engine's fixed fare-hold window), but there is no mechanism to guarantee the same fare if the user returns within the window.
 - **Ingress for CI.** Cloud Run ingress is set to all (but still requires authentication) to allow GitHub‑hosted runners to reach the deployed service. A stricter posture would move smoke tests inside the project.
 
   **New here?**

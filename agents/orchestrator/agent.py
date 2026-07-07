@@ -59,7 +59,10 @@ def _is_local(url: str) -> bool:
 # Local dev hits an unauthenticated engine, so skip ID-token auth (fetching one
 # would require GCP credentials and fail). Deployed engines run
 # --no-allow-unauthenticated, so every call carries an ID token.
-_timeout = httpx.Timeout(60.0, connect=10.0)
+# Read timeout matches the engine's Cloud Run request timeout (120s): the engine's
+# inbound LLM call can be slow, and abandoning a request the engine will still
+# complete wastes the quote (observed: a 66s engine response vs a 60s client cap).
+_timeout = httpx.Timeout(120.0, connect=10.0)
 if _is_local(_fare_engine_url):
     logger.info("FARE_ENGINE_URL is local (%s); calling without ID-token auth", _fare_engine_url)
     _client = httpx.AsyncClient(timeout=_timeout)

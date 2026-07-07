@@ -4,11 +4,15 @@ from pydantic import BaseModel, Field, model_validator
 
 TravelClass = Literal["economy", "premium_economy", "business", "first"]
 TripPurpose = Literal["client_meeting", "conference", "internal_training", "other"]
+# Human-shaped counterpart of the engine contract's journey_type: it resolves the
+# ambiguity of a missing return_date (one-way trip vs. not-yet-answered).
+TripType = Literal["one_way", "round_trip"]
 
-# The fare engine rejects requests whose passenger counts sum to more than 9
-# (DECISIONS.md §3). Mirror that cap here so intake fails fast instead of
-# producing a trip the engine will reject downstream.
-MAX_TOTAL_PASSENGERS = 9
+# The fare engine caps SEATED passengers (adults + children) at 9 and allows at
+# most one lap infant per adult (engine DECISIONS.md §4). Mirror both rules here
+# so intake fails fast instead of producing a trip the engine will reject
+# downstream.
+MAX_SEATED_PASSENGERS = 9
 
 
 class TravelerProfile(BaseModel):
@@ -26,18 +30,27 @@ class PassengerGroup(BaseModel):
 class TripRequest(BaseModel):
     origin: str | None = None
     destination: str | None = None
+    trip_type: TripType | None = None
     departure_date: str | None = None  # ISO 8601
-    return_date: str | None = None
+    return_date: str | None = None  # required iff trip_type == "round_trip"
     passengers: list[PassengerGroup] = Field(default_factory=list)
     travel_class: TravelClass | None = None
     trip_purpose: TripPurpose | None = None
 
     @model_validator(mode="after")
-    def _check_total_passengers(self) -> "TripRequest":
-        total = sum(g.count for g in self.passengers)
-        if total > MAX_TOTAL_PASSENGERS:
+    def _check_passenger_rules(self) -> "TripRequest":
+        seated = sum(g.count for g in self.passengers if g.type in ("adult", "child"))
+        adults = sum(g.count for g in self.passengers if g.type == "adult")
+        infants = sum(g.count for g in self.passengers if g.type == "infant")
+        if seated > MAX_SEATED_PASSENGERS:
             raise ValueError(
-                f"total passenger count {total} exceeds maximum {MAX_TOTAL_PASSENGERS}"
+                f"seated passenger count {seated} (adults + children) "
+                f"exceeds maximum {MAX_SEATED_PASSENGERS}"
+            )
+        if infants > adults:
+            raise ValueError(
+                f"infant count {infants} exceeds adult count {adults}: "
+                "one lap infant per adult"
             )
         return self
 

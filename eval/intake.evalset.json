@@ -1,7 +1,7 @@
 {
   "eval_set_id": "intake_baseline",
   "name": "intake baseline",
-  "description": "Intake agent parses natural-language trip requests into structured IntakeOutput. Graded on response match (no tools). All traveler data is obviously fake per CLAUDE.md data-hygiene rule.",
+  "description": "Intake agent parses natural-language trip requests into structured IntakeOutput, including trip_type (one_way/round_trip). Graded on response match (no tools). All traveler data is obviously fake per CLAUDE.md data-hygiene rule.",
   "eval_cases": [
     {
       "eval_id": "complete_single_adult_economy",
@@ -20,7 +20,33 @@
             "role": "model",
             "parts": [
               {
-                "text": "{\"traveler\":{\"name\":\"Test Traveler\",\"email\":\"test.traveler@example.com\",\"employee_id\":\"00001\",\"department\":\"Engineering\"},\"trip\":{\"origin\":\"JFK\",\"destination\":\"LAX\",\"departure_date\":\"2026-09-15\",\"return_date\":\"2026-09-20\",\"passengers\":[{\"count\":1,\"type\":\"adult\"}],\"travel_class\":\"economy\",\"trip_purpose\":\"client_meeting\"},\"missing_fields\":[],\"ready_for_policy\":true}"
+                "text": "{\"traveler\":{\"name\":\"Test Traveler\",\"email\":\"test.traveler@example.com\",\"employee_id\":\"00001\",\"department\":\"Engineering\"},\"trip\":{\"origin\":\"JFK\",\"destination\":\"LAX\",\"trip_type\":\"round_trip\",\"departure_date\":\"2026-09-15\",\"return_date\":\"2026-09-20\",\"passengers\":[{\"count\":1,\"type\":\"adult\"}],\"travel_class\":\"economy\",\"trip_purpose\":\"client_meeting\"},\"missing_fields\":[],\"ready_for_policy\":true}"
+              }
+            ]
+          },
+          "intermediate_data": { "tool_uses": [], "tool_responses": [] }
+        }
+      ],
+      "session_input": { "app_name": "intake", "user_id": "u-eval", "state": {} }
+    },
+    {
+      "eval_id": "complete_one_way",
+      "conversation": [
+        {
+          "invocation_id": "intake-4",
+          "user_content": {
+            "role": "user",
+            "parts": [
+              {
+                "text": "Test Traveler Three here (t3@example.com, employee 00003, Support). I need a one-way flight from BOS to DEN on 2026-11-03, economy, for an internal training. Just me, one adult. I'm relocating so no return flight."
+              }
+            ]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "{\"traveler\":{\"name\":\"Test Traveler Three\",\"email\":\"t3@example.com\",\"employee_id\":\"00003\",\"department\":\"Support\"},\"trip\":{\"origin\":\"BOS\",\"destination\":\"DEN\",\"trip_type\":\"one_way\",\"departure_date\":\"2026-11-03\",\"return_date\":null,\"passengers\":[{\"count\":1,\"type\":\"adult\"}],\"travel_class\":\"economy\",\"trip_purpose\":\"internal_training\"},\"missing_fields\":[],\"ready_for_policy\":true}"
               }
             ]
           },
@@ -46,7 +72,7 @@
             "role": "model",
             "parts": [
               {
-                "text": "{\"traveler\":{\"name\":null,\"email\":null,\"employee_id\":null,\"department\":null},\"trip\":{\"origin\":\"JFK\",\"destination\":\"SFO\",\"departure_date\":null,\"return_date\":null,\"passengers\":[{\"count\":2,\"type\":\"adult\"},{\"count\":1,\"type\":\"child\"}],\"travel_class\":\"business\",\"trip_purpose\":\"conference\"},\"missing_fields\":[\"traveler.name\",\"traveler.email\",\"trip.departure_date\"],\"ready_for_policy\":false}"
+                "text": "{\"traveler\":{\"name\":null,\"email\":null,\"employee_id\":null,\"department\":null},\"trip\":{\"origin\":\"JFK\",\"destination\":\"SFO\",\"trip_type\":null,\"departure_date\":null,\"return_date\":null,\"passengers\":[{\"count\":2,\"type\":\"adult\"},{\"count\":1,\"type\":\"child\"}],\"travel_class\":\"business\",\"trip_purpose\":\"conference\"},\"missing_fields\":[\"traveler.name\",\"traveler.email\",\"traveler.employee_id\",\"traveler.department\",\"trip.trip_type\",\"trip.departure_date\"],\"ready_for_policy\":false}"
               }
             ]
           },
@@ -72,7 +98,7 @@
             "role": "model",
             "parts": [
               {
-                "text": "{\"traveler\":{\"name\":\"Test Traveler Two\",\"email\":\"t2@example.com\",\"employee_id\":\"00002\",\"department\":\"Sales\"},\"trip\":{\"origin\":\"SFO\",\"destination\":\"SEA\",\"departure_date\":\"2026-02-10\",\"return_date\":\"2026-02-14\",\"passengers\":[{\"count\":2,\"type\":\"adult\"},{\"count\":1,\"type\":\"infant\"}],\"travel_class\":\"premium_economy\",\"trip_purpose\":\"internal_training\"},\"missing_fields\":[],\"ready_for_policy\":true}"
+                "text": "{\"traveler\":{\"name\":\"Test Traveler Two\",\"email\":\"t2@example.com\",\"employee_id\":\"00002\",\"department\":\"Sales\"},\"trip\":{\"origin\":\"SFO\",\"destination\":\"SEA\",\"trip_type\":\"round_trip\",\"departure_date\":\"2026-02-10\",\"return_date\":\"2026-02-14\",\"passengers\":[{\"count\":2,\"type\":\"adult\"},{\"count\":1,\"type\":\"infant\"}],\"travel_class\":\"premium_economy\",\"trip_purpose\":\"internal_training\"},\"missing_fields\":[],\"ready_for_policy\":true}"
               }
             ]
           },

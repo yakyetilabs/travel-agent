@@ -51,11 +51,14 @@ gcloud iam service-accounts describe "${DEPLOYER_SA}" --project "${PROJECT_ID}" 
 echo "==> Granting deploy permissions to ${DEPLOYER_SA}..."
 # What 'gcloud run deploy --source' needs: deploy services, run Cloud Build,
 # upload source to GCS, push images to Artifact Registry.
+# aiplatform.user is for the CI 'evals' job: the ADK evals call Vertex AI
+# (Gemini) under this same identity via WIF.
 for role in roles/run.admin \
             roles/cloudbuild.builds.editor \
             roles/storage.admin \
             roles/artifactregistry.admin \
-            roles/serviceusage.serviceUsageConsumer; do
+            roles/serviceusage.serviceUsageConsumer \
+            roles/aiplatform.user; do
   gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
     --member "serviceAccount:${DEPLOYER_SA}" --role "${role}" --condition=None >/dev/null
 done

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# One-time GCP provisioning for the Travel Pre-Qualification system.
+# One-time GCP provisioning for the Travel Pre-Trip Approval system.
 # Idempotent: safe to re-run. It does NOT deploy services — it prepares the
 # project, identities, and IAM so the two `gcloud run deploy` commands work.
 #
