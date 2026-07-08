@@ -56,6 +56,9 @@ adk web                      # open http://localhost:8000, pick "orchestrator"
 
 The engine's pure math also runs with zero setup: `cd travel-fare-engine && go test ./...`.
 
+You can also run the local orchestrator against the **deployed, private** engine (no local Go process): point `FARE_ENGINE_URL` at the engine's Cloud Run URL from §6.
+Cloud Run IAM then requires ID tokens, which user ADC cannot mint, so set `GOOGLE_APPLICATION_CREDENTIALS` to a service-account key for `travel-prequal-sa`; the mint command is documented in [.env.example](../.env.example).
+
 ## 3. Configure your values
 
 Set these in your shell; every command below uses them.

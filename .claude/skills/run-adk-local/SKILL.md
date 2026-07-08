@@ -34,7 +34,7 @@ The orchestrator references the fare_engine via RemoteA2AAgent at
 
 ## Evals
 
-Eval sets live in eval/<agent>.evalset.json. Run:
+Eval sets live in eval/<agent>.evalset.json. First time: `uv sync --extra eval`. Run:
 
 ```bash
 adk eval agents/<name> eval/<agent>.evalset.json --config_file_path eval/test_config.json
@@ -42,5 +42,8 @@ adk eval agents/<name> eval/<agent>.evalset.json --config_file_path eval/test_co
 
 The flag is required: the CLI does not auto-discover eval/test_config.json and
 would otherwise grade with ADK's stricter defaults.
+
+The CLI always exits 0, even on failures — local inspection only. The enforced
+gate (used by CI) is `RUN_ADK_EVALS=1 uv run pytest tests/test_evals.py`.
 
 Always create at least 3 eval cases per agent before considering it "done".

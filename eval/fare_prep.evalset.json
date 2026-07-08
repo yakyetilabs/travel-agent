@@ -10,7 +10,11 @@
           "invocation_id": "prep-1",
           "user_content": {
             "role": "user",
-            "parts": [{ "text": "Prepare the fare request for this trip." }]
+            "parts": [
+              {
+                "text": "Prepare the fare request for this trip."
+              }
+            ]
           },
           "intermediate_data": {
             "tool_uses": [
@@ -21,13 +25,26 @@
                   "destination": "LAX",
                   "departure_date": "2026-09-15",
                   "travel_class": "economy",
-                  "passengers": [{ "count": 1, "type": "adult" }],
+                  "passengers": [
+                    {
+                      "count": 1,
+                      "type": "adult"
+                    }
+                  ],
                   "trip_type": "round_trip",
                   "return_date": "2026-09-20"
                 }
               }
             ],
             "tool_responses": []
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "{\"ok\": true, \"fare_request\": {\"journey_type\": \"round_trip\", \"cabin_class\": \"economy\", \"route_type\": \"domestic\", \"passengers\": [{\"count\": 1, \"type\": \"adult\"}], \"fare_components\": [{\"direction\": \"outbound\", \"base_distance_miles\": 2470, \"advance_purchase_days\": 70, \"booking_class\": \"G\", \"season_code\": \"shoulder\"}, {\"direction\": \"return\", \"base_distance_miles\": 2470, \"advance_purchase_days\": 75, \"booking_class\": \"G\", \"season_code\": \"shoulder\"}]}}"
+              }
+            ]
           }
         }
       ],
@@ -36,8 +53,27 @@
         "user_id": "u-eval",
         "state": {
           "intake_output": {
-            "traveler": { "name": "Test Traveler", "email": "test.traveler@example.com", "employee_id": "00001", "department": "Engineering" },
-            "trip": { "origin": "JFK", "destination": "LAX", "trip_type": "round_trip", "departure_date": "2026-09-15", "return_date": "2026-09-20", "passengers": [{ "count": 1, "type": "adult" }], "travel_class": "economy", "trip_purpose": "client_meeting" },
+            "traveler": {
+              "name": "Test Traveler",
+              "email": "test.traveler@example.com",
+              "employee_id": "00001",
+              "department": "Engineering"
+            },
+            "trip": {
+              "origin": "JFK",
+              "destination": "LAX",
+              "trip_type": "round_trip",
+              "departure_date": "2026-09-15",
+              "return_date": "2026-09-20",
+              "passengers": [
+                {
+                  "count": 1,
+                  "type": "adult"
+                }
+              ],
+              "travel_class": "economy",
+              "trip_purpose": "client_meeting"
+            },
             "missing_fields": [],
             "ready_for_policy": true
           }
@@ -51,7 +87,11 @@
           "invocation_id": "prep-4",
           "user_content": {
             "role": "user",
-            "parts": [{ "text": "Prepare the fare request for this trip." }]
+            "parts": [
+              {
+                "text": "Prepare the fare request for this trip."
+              }
+            ]
           },
           "intermediate_data": {
             "tool_uses": [
@@ -62,12 +102,25 @@
                   "destination": "DEN",
                   "departure_date": "2026-11-03",
                   "travel_class": "economy",
-                  "passengers": [{ "count": 1, "type": "adult" }],
+                  "passengers": [
+                    {
+                      "count": 1,
+                      "type": "adult"
+                    }
+                  ],
                   "trip_type": "one_way"
                 }
               }
             ],
             "tool_responses": []
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "{\"ok\": true, \"fare_request\": {\"journey_type\": \"one_way\", \"cabin_class\": \"economy\", \"route_type\": \"domestic\", \"passengers\": [{\"count\": 1, \"type\": \"adult\"}], \"fare_components\": [{\"direction\": \"outbound\", \"base_distance_miles\": 1750, \"advance_purchase_days\": 119, \"booking_class\": \"G\", \"season_code\": \"low\"}]}}"
+              }
+            ]
           }
         }
       ],
@@ -76,8 +129,27 @@
         "user_id": "u-eval",
         "state": {
           "intake_output": {
-            "traveler": { "name": "Test Traveler Three", "email": "t3@example.com", "employee_id": "00003", "department": "Support" },
-            "trip": { "origin": "BOS", "destination": "DEN", "trip_type": "one_way", "departure_date": "2026-11-03", "return_date": null, "passengers": [{ "count": 1, "type": "adult" }], "travel_class": "economy", "trip_purpose": "internal_training" },
+            "traveler": {
+              "name": "Test Traveler Three",
+              "email": "t3@example.com",
+              "employee_id": "00003",
+              "department": "Support"
+            },
+            "trip": {
+              "origin": "BOS",
+              "destination": "DEN",
+              "trip_type": "one_way",
+              "departure_date": "2026-11-03",
+              "return_date": null,
+              "passengers": [
+                {
+                  "count": 1,
+                  "type": "adult"
+                }
+              ],
+              "travel_class": "economy",
+              "trip_purpose": "internal_training"
+            },
             "missing_fields": [],
             "ready_for_policy": true
           }
@@ -91,7 +163,11 @@
           "invocation_id": "prep-2",
           "user_content": {
             "role": "user",
-            "parts": [{ "text": "Prepare the fare request for this trip." }]
+            "parts": [
+              {
+                "text": "Prepare the fare request for this trip."
+              }
+            ]
           },
           "intermediate_data": {
             "tool_uses": [
@@ -102,13 +178,30 @@
                   "destination": "LHR",
                   "departure_date": "2026-07-15",
                   "travel_class": "economy",
-                  "passengers": [{ "count": 2, "type": "adult" }, { "count": 1, "type": "child" }],
+                  "passengers": [
+                    {
+                      "count": 2,
+                      "type": "adult"
+                    },
+                    {
+                      "count": 1,
+                      "type": "child"
+                    }
+                  ],
                   "trip_type": "round_trip",
                   "return_date": "2026-07-25"
                 }
               }
             ],
             "tool_responses": []
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "{\"ok\": true, \"fare_request\": {\"journey_type\": \"round_trip\", \"cabin_class\": \"economy\", \"route_type\": \"international\", \"passengers\": [{\"count\": 2, \"type\": \"adult\"}, {\"count\": 1, \"type\": \"child\"}], \"fare_components\": [{\"direction\": \"outbound\", \"base_distance_miles\": 3442, \"advance_purchase_days\": 8, \"booking_class\": \"H\", \"season_code\": \"peak\"}, {\"direction\": \"return\", \"base_distance_miles\": 3442, \"advance_purchase_days\": 18, \"booking_class\": \"Q\", \"season_code\": \"peak\"}]}}"
+              }
+            ]
           }
         }
       ],
@@ -117,8 +210,31 @@
         "user_id": "u-eval",
         "state": {
           "intake_output": {
-            "traveler": { "name": "Test Traveler", "email": "test.traveler@example.com", "employee_id": "00001", "department": "Engineering" },
-            "trip": { "origin": "JFK", "destination": "LHR", "trip_type": "round_trip", "departure_date": "2026-07-15", "return_date": "2026-07-25", "passengers": [{ "count": 2, "type": "adult" }, { "count": 1, "type": "child" }], "travel_class": "economy", "trip_purpose": "conference" },
+            "traveler": {
+              "name": "Test Traveler",
+              "email": "test.traveler@example.com",
+              "employee_id": "00001",
+              "department": "Engineering"
+            },
+            "trip": {
+              "origin": "JFK",
+              "destination": "LHR",
+              "trip_type": "round_trip",
+              "departure_date": "2026-07-15",
+              "return_date": "2026-07-25",
+              "passengers": [
+                {
+                  "count": 2,
+                  "type": "adult"
+                },
+                {
+                  "count": 1,
+                  "type": "child"
+                }
+              ],
+              "travel_class": "economy",
+              "trip_purpose": "conference"
+            },
             "missing_fields": [],
             "ready_for_policy": true
           }
@@ -132,7 +248,11 @@
           "invocation_id": "prep-3",
           "user_content": {
             "role": "user",
-            "parts": [{ "text": "Prepare the fare request for this trip." }]
+            "parts": [
+              {
+                "text": "Prepare the fare request for this trip."
+              }
+            ]
           },
           "intermediate_data": {
             "tool_uses": [
@@ -143,13 +263,26 @@
                   "destination": "ZZZ",
                   "departure_date": "2026-09-15",
                   "travel_class": "economy",
-                  "passengers": [{ "count": 1, "type": "adult" }],
+                  "passengers": [
+                    {
+                      "count": 1,
+                      "type": "adult"
+                    }
+                  ],
                   "trip_type": "round_trip",
                   "return_date": "2026-09-20"
                 }
               }
             ],
             "tool_responses": []
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "{\"ok\": false, \"error\": \"unknown destination airport 'ZZZ'\"}"
+              }
+            ]
           }
         }
       ],
@@ -158,8 +291,27 @@
         "user_id": "u-eval",
         "state": {
           "intake_output": {
-            "traveler": { "name": "Test Traveler", "email": "test.traveler@example.com", "employee_id": "00001", "department": "Engineering" },
-            "trip": { "origin": "JFK", "destination": "ZZZ", "trip_type": "round_trip", "departure_date": "2026-09-15", "return_date": "2026-09-20", "passengers": [{ "count": 1, "type": "adult" }], "travel_class": "economy", "trip_purpose": "other" },
+            "traveler": {
+              "name": "Test Traveler",
+              "email": "test.traveler@example.com",
+              "employee_id": "00001",
+              "department": "Engineering"
+            },
+            "trip": {
+              "origin": "JFK",
+              "destination": "ZZZ",
+              "trip_type": "round_trip",
+              "departure_date": "2026-09-15",
+              "return_date": "2026-09-20",
+              "passengers": [
+                {
+                  "count": 1,
+                  "type": "adult"
+                }
+              ],
+              "travel_class": "economy",
+              "trip_purpose": "other"
+            },
             "missing_fields": [],
             "ready_for_policy": true
           }
