@@ -17,7 +17,9 @@ orchestrator (SequentialAgent)
   ├─ fare_prep   LlmAgent — deterministic translation to engine [deterministic tool]
   ├─ fare_engine RemoteA2aAgent — remote Go service; computes the fare and returns FareQuote
   ├─ policy      LlmAgent — corporate policy checks [tools]
-  └─ finalizer   LlmAgent — assemble PreTripApprovalOutput [output_schema]
+  └─ finalizer   SequentialAgent - prose by LLM, structure by code
+       ├─ summary_writer       LlmAgent - writes the human summary [output_key]
+       └─ finalizer_assembler  custom BaseAgent, no LLM - assembles PreTripApprovalOutput in pure Python
 ```
 
 - **intake** talks to the user and gathers all required traveler + trip fields, including the trip type (one-way or round trip).
@@ -33,7 +35,8 @@ orchestrator (SequentialAgent)
   The duration check applies only to round trips (one-way trips skip it), and a same-day round trip is a legitimate day trip.
   If the engine returns no quote (outage, timeout, or refusal to price), `check_budget` runs without a fare and returns `needs_approval`, so the trip escalates to a manager instead of being approved with its budget unverified.
   All thresholds are module constants in [tools/policy.py](tools/policy.py); the LLM neither applies policy itself nor passes thresholds to the tools.
-- **finalizer** assembles the final `PreTripApprovalOutput` from intake, policy, and fare results.
+- **finalizer** is two agents in sequence: `summary_writer` (LLM) writes the 1-3 sentence human summary - the only generative field in the output - and `finalizer_assembler` (a model-free custom agent) assembles `PreTripApprovalOutput` in pure Python from intake, policy, and fare results.
+  The fare quote is copied verbatim from the current invocation's engine response, never retyped by a model, mirroring the engine's own deterministic quote passthrough.
 
 ## What this project demonstrates
 
@@ -45,6 +48,7 @@ Swap travel for mortgages or insurance and every one of them still applies.
    LLMs never compute a number or make a policy decision.
    They translate human input into structured requests, decide when to call tools, and explain results.
    Every dollar figure and every approve/deny verdict comes from a pure, unit-tested function ([tools/fare_request.py](tools/fare_request.py), [tools/policy.py](tools/policy.py), and the engine's `Calculate`).
+   The final approval record is likewise assembled in code ([agents/finalizer/assembler.py](agents/finalizer/assembler.py)); the only LLM-authored field in the output is the prose summary.
    This is the trust argument for using LLMs anywhere near money or compliance.
 
 2. **Hard contracts between independently deployable agent services.**
@@ -62,7 +66,7 @@ Swap travel for mortgages or insurance and every one of them still applies.
 
 5. **Typed state as the inter-agent interface.**
    Agents hand each other validated Pydantic/JSON structures through session state, not free-form prose.
-   The repo also documents the ADK-specific craft this requires: the output_schema-vs-tools trade-off, `output_key` templating, and the finalizer pattern (see [docs/LESSONS.md](docs/LESSONS.md)).
+   The repo also documents the ADK-specific craft this requires: the output_schema-vs-tools trade-off, `output_key` templating, and the deterministic finalizer pattern (the decisions are in [docs/DECISIONS.md](docs/DECISIONS.md); the gotchas behind them in [docs/LESSONS.md](docs/LESSONS.md)).
 
 6. **Engineering rigor applied to agents.**
    Eval sets pin tool trajectories with a baseline-before-change discipline; contract tripwires run in CI; and unit tests prove the translator can never emit a request the engine would reject, across every advance-purchase day of the year ([tests/test_fare_request.py](tests/test_fare_request.py)).
@@ -154,5 +158,6 @@ The orchestrator’s runtime service account must hold `roles/run.invoker` on th
 
   **New here?**
 
-> Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the two fit together.
+> Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the two fit together,
+> [docs/DECISIONS.md](docs/DECISIONS.md) for the design decisions and the alternatives we rejected,
 > [DEPLOY.md](docs/DEPLOY.md) to stand up your own, and [LESSONS.md](docs/LESSONS.md) for the gotchas (and the concepts behind them).

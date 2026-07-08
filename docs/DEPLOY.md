@@ -7,10 +7,10 @@ in [§3](#3-configure-your-values) once and the rest is paste-friendly.
 If a step fails, check [LESSONS.md](LESSONS.md) — most of the walls you can hit are
 documented there with fixes.
 
-> **Cost:** essentially $0 idle. Cloud Run scales to zero (you pay only while
-> serving a request); Vertex AI is per-token (cents per run); the only standing
-> cost is a few cents/month of container image storage. Set a budget alert anyway
-> (§Cost), and run [teardown](#teardown) when you're done.
+> **Cost controls:** both Cloud Run services scale to zero when idle and are
+> capped at two instances; Vertex AI is billed per token. Set a project budget
+> alert ([Cost controls](#cost-controls)) and run [teardown](#teardown) when
+> you're done.
 
 ---
 
@@ -166,13 +166,12 @@ automatically. See the workflows in each repo's `.github/workflows/deploy.yml`.
 
 ---
 
-## Cost
+## Cost controls
 
-- **Idle:** ~$0 (scale-to-zero; only image storage, cents/month).
-- **Per demo run:** a handful of Gemini Flash calls = sub-cent.
-- **Guardrails baked in:** `--min-instances=0` + `--max-instances=2`.
-- **Set a budget alert:** Console → Billing → Budgets & alerts → e.g. $10/month
-  with email at 50/90/100%.
+- **Scale to zero:** `--min-instances=0` - the services consume nothing while idle.
+- **Capped scale-out:** `--max-instances=2` bounds concurrent instances.
+- **Per-token inference:** Vertex AI (Gemini Flash) is billed per token.
+- **Budget alert:** set one under Console → Billing → Budgets & alerts, with email notifications.
 
 ## Teardown
 
