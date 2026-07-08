@@ -71,3 +71,14 @@ async def test_fare_prep_evalset() -> None:
         eval_dataset_file_path_or_dir=str(_ROOT / "eval" / "fare_prep.evalset.json"),
         num_runs=1,
     )
+
+
+@pytest.mark.asyncio
+async def test_policy_evalset() -> None:
+    from google.adk.evaluation.agent_evaluator import AgentEvaluator
+
+    await AgentEvaluator.evaluate(
+        agent_module="agents.policy.agent",
+        eval_dataset_file_path_or_dir=str(_ROOT / "eval" / "policy.evalset.json"),
+        num_runs=1,
+    )

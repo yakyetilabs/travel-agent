@@ -1,0 +1,427 @@
+{
+  "eval_set_id": "policy_baseline",
+  "name": "policy baseline",
+  "description": "Policy agent evals pin the LLM-owned behaviors only: which tools get called, argument transcription (total_fare from the FareQuote in conversation history, dates/class from {intake_output} state), and faithful explanation of the tools' three-way verdicts. Deterministic threshold math and verdict boundaries are owned by tests/test_policy.py unit tests, not re-tested here. The user message stands in for the pipeline's conversation history: it carries the fare engine's FareQuote JSON (real fare.Calculate output for each trip, generated 2026-07-07) or, in the degraded case, the A2A failure. Graded on exact tool trajectory; reference responses embed run-date-dependent days-in-advance numbers, so response_match is lenient by design.",
+  "eval_cases": [
+    {
+      "eval_id": "all_pass_round_trip_approved",
+      "conversation": [
+        {
+          "invocation_id": "policy-1",
+          "user_content": {
+            "role": "user",
+            "parts": [
+              {
+                "text": "Here is the fare engine's response:\n{\"journey_type\":\"round_trip\",\"base_fare\":249.96,\"taxes\":[{\"code\":\"US\",\"amount\":9.37,\"name\":\"U.S. Transportation Tax\"},{\"code\":\"XF\",\"amount\":4.5,\"name\":\"Passenger Facility Charge\"},{\"code\":\"AY\",\"amount\":5.6,\"name\":\"September 11th Security Fee\"},{\"code\":\"US\",\"amount\":9.37,\"name\":\"U.S. Transportation Tax\"},{\"code\":\"XF\",\"amount\":4.5,\"name\":\"Passenger Facility Charge\"},{\"code\":\"AY\",\"amount\":5.6,\"name\":\"September 11th Security Fee\"}],\"total_fare\":288.9,\"currency\":\"USD\",\"fare_components\":[{\"direction\":\"outbound\",\"base_fare\":124.98,\"booking_class\":\"G\",\"fare_basis_code\":\"EGSD05\",\"fare_rules\":{\"refundable\":false,\"changeable\":false,\"advance_purchase_min\":21}},{\"direction\":\"return\",\"base_fare\":124.98,\"booking_class\":\"G\",\"fare_basis_code\":\"EGSD05\",\"fare_rules\":{\"refundable\":false,\"changeable\":false,\"advance_purchase_min\":21}}],\"pricing_breakdown\":[\"Outbound base fare: 2470 miles * $0.0575/mile = $142.03\",\"Outbound advance purchase discount (70 days): -$17.04 (12%)\",\"Outbound 1 adult(s): $124.98\",\"Outbound U.S. Transportation Tax (adult): $9.37\",\"Outbound Passenger Facility Charge (adult): $4.50\",\"Outbound September 11th Security Fee (adult): $5.60\",\"Return base fare: 2470 miles * $0.0575/mile = $142.03\",\"Return advance purchase discount (75 days): -$17.04 (12%)\",\"Return 1 adult(s): $124.98\",\"Return U.S. Transportation Tax (adult): $9.37\",\"Return Passenger Facility Charge (adult): $4.50\",\"Return September 11th Security Fee (adult): $5.60\",\"Journey total: $288.90\"],\"quote_id\":\"c4ecb5cddb83c4b540c0ebac6b578455\",\"expires_at\":\"2026-07-09T02:36:30Z\"}\n\nEvaluate this trip against corporate travel policy."
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "check_budget",
+                "args": {
+                  "total_fare": 288.9
+                }
+              },
+              {
+                "name": "check_travel_class",
+                "args": {
+                  "requested_class": "economy"
+                }
+              },
+              {
+                "name": "check_advance_purchase",
+                "args": {
+                  "departure_date_str": "2026-09-15"
+                }
+              },
+              {
+                "name": "check_max_trip_duration",
+                "args": {
+                  "departure_date_str": "2026-09-15",
+                  "return_date_str": "2026-09-20"
+                }
+              }
+            ],
+            "tool_responses": []
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "{\"status\":\"approved\",\"reasons\":[\"total fare $288.90 within $2000.00 trip budget cap\",\"economy is within policy\",\"70 days in advance, meets 7 day minimum\",\"trip duration 5 days within 14 day limit\"],\"requires_manager_approval\":false}"
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "policy",
+        "user_id": "u-eval",
+        "state": {
+          "intake_output": {
+            "traveler": {
+              "name": "Test Traveler",
+              "email": "test.traveler@example.com",
+              "employee_id": "00001",
+              "department": "Engineering"
+            },
+            "trip": {
+              "origin": "JFK",
+              "destination": "LAX",
+              "trip_type": "round_trip",
+              "departure_date": "2026-09-15",
+              "return_date": "2026-09-20",
+              "passengers": [
+                {
+                  "count": 1,
+                  "type": "adult"
+                }
+              ],
+              "travel_class": "economy",
+              "trip_purpose": "client_meeting"
+            },
+            "missing_fields": [],
+            "ready_for_policy": true
+          }
+        }
+      }
+    },
+    {
+      "eval_id": "business_cabin_needs_review",
+      "conversation": [
+        {
+          "invocation_id": "policy-2",
+          "user_content": {
+            "role": "user",
+            "parts": [
+              {
+                "text": "Here is the fare engine's response:\n{\"journey_type\":\"round_trip\",\"base_fare\":749.9,\"taxes\":[{\"code\":\"US\",\"amount\":28.12,\"name\":\"U.S. Transportation Tax\"},{\"code\":\"XF\",\"amount\":4.5,\"name\":\"Passenger Facility Charge\"},{\"code\":\"AY\",\"amount\":5.6,\"name\":\"September 11th Security Fee\"},{\"code\":\"US\",\"amount\":28.12,\"name\":\"U.S. Transportation Tax\"},{\"code\":\"XF\",\"amount\":4.5,\"name\":\"Passenger Facility Charge\"},{\"code\":\"AY\",\"amount\":5.6,\"name\":\"September 11th Security Fee\"}],\"total_fare\":826.34,\"currency\":\"USD\",\"fare_components\":[{\"direction\":\"outbound\",\"base_fare\":374.95,\"booking_class\":\"G\",\"fare_basis_code\":\"BGSD05\",\"fare_rules\":{\"refundable\":false,\"changeable\":false,\"advance_purchase_min\":21}},{\"direction\":\"return\",\"base_fare\":374.95,\"booking_class\":\"G\",\"fare_basis_code\":\"BGSD05\",\"fare_rules\":{\"refundable\":false,\"changeable\":false,\"advance_purchase_min\":21}}],\"pricing_breakdown\":[\"Outbound base fare: 2470 miles * $0.1725/mile = $426.07\",\"Outbound advance purchase discount (70 days): -$51.13 (12%)\",\"Outbound 1 adult(s): $374.95\",\"Outbound U.S. Transportation Tax (adult): $28.12\",\"Outbound Passenger Facility Charge (adult): $4.50\",\"Outbound September 11th Security Fee (adult): $5.60\",\"Return base fare: 2470 miles * $0.1725/mile = $426.07\",\"Return advance purchase discount (75 days): -$51.13 (12%)\",\"Return 1 adult(s): $374.95\",\"Return U.S. Transportation Tax (adult): $28.12\",\"Return Passenger Facility Charge (adult): $4.50\",\"Return September 11th Security Fee (adult): $5.60\",\"Journey total: $826.34\"],\"quote_id\":\"001501c139a0ed35308bd2d6068a7080\",\"expires_at\":\"2026-07-09T02:36:30Z\"}\n\nEvaluate this trip against corporate travel policy."
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "check_budget",
+                "args": {
+                  "total_fare": 826.34
+                }
+              },
+              {
+                "name": "check_travel_class",
+                "args": {
+                  "requested_class": "business"
+                }
+              },
+              {
+                "name": "check_advance_purchase",
+                "args": {
+                  "departure_date_str": "2026-09-15"
+                }
+              },
+              {
+                "name": "check_max_trip_duration",
+                "args": {
+                  "departure_date_str": "2026-09-15",
+                  "return_date_str": "2026-09-20"
+                }
+              }
+            ],
+            "tool_responses": []
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "{\"status\":\"needs_review\",\"reasons\":[\"total fare $826.34 within $2000.00 trip budget cap\",\"business requires manager approval\",\"70 days in advance, meets 7 day minimum\",\"trip duration 5 days within 14 day limit\"],\"requires_manager_approval\":true}"
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "policy",
+        "user_id": "u-eval",
+        "state": {
+          "intake_output": {
+            "traveler": {
+              "name": "Test Traveler Two",
+              "email": "t2@example.com",
+              "employee_id": "00002",
+              "department": "Sales"
+            },
+            "trip": {
+              "origin": "JFK",
+              "destination": "LAX",
+              "trip_type": "round_trip",
+              "departure_date": "2026-09-15",
+              "return_date": "2026-09-20",
+              "passengers": [
+                {
+                  "count": 1,
+                  "type": "adult"
+                }
+              ],
+              "travel_class": "business",
+              "trip_purpose": "client_meeting"
+            },
+            "missing_fields": [],
+            "ready_for_policy": true
+          }
+        }
+      }
+    },
+    {
+      "eval_id": "first_cabin_one_way_denied",
+      "conversation": [
+        {
+          "invocation_id": "policy-3",
+          "user_content": {
+            "role": "user",
+            "parts": [
+              {
+                "text": "Here is the fare engine's response:\n{\"journey_type\":\"one_way\",\"base_fare\":652.74,\"taxes\":[{\"code\":\"US\",\"amount\":48.96,\"name\":\"U.S. Transportation Tax\"},{\"code\":\"XF\",\"amount\":4.5,\"name\":\"Passenger Facility Charge\"},{\"code\":\"AY\",\"amount\":5.6,\"name\":\"September 11th Security Fee\"}],\"total_fare\":711.8,\"currency\":\"USD\",\"fare_components\":[{\"direction\":\"outbound\",\"base_fare\":652.74,\"booking_class\":\"G\",\"fare_basis_code\":\"FGSD05\",\"fare_rules\":{\"refundable\":false,\"changeable\":false,\"advance_purchase_min\":21}}],\"pricing_breakdown\":[\"Outbound base fare: 2580 miles * $0.2875/mile = $741.75\",\"Outbound advance purchase discount (65 days): -$89.01 (12%)\",\"Outbound 1 adult(s): $652.74\",\"Outbound U.S. Transportation Tax (adult): $48.96\",\"Outbound Passenger Facility Charge (adult): $4.50\",\"Outbound September 11th Security Fee (adult): $5.60\",\"Journey total: $711.80\"],\"quote_id\":\"1f2900b63efa53bd910ef973b0140513\",\"expires_at\":\"2026-07-09T02:36:30Z\"}\n\nEvaluate this trip against corporate travel policy."
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "check_budget",
+                "args": {
+                  "total_fare": 711.8
+                }
+              },
+              {
+                "name": "check_travel_class",
+                "args": {
+                  "requested_class": "first"
+                }
+              },
+              {
+                "name": "check_advance_purchase",
+                "args": {
+                  "departure_date_str": "2026-09-10"
+                }
+              }
+            ],
+            "tool_responses": []
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "{\"status\":\"denied\",\"reasons\":[\"total fare $711.80 within $2000.00 trip budget cap\",\"first is prohibited by policy\",\"65 days in advance, meets 7 day minimum\",\"one-way trip: duration limit not applicable\"],\"requires_manager_approval\":false}"
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "policy",
+        "user_id": "u-eval",
+        "state": {
+          "intake_output": {
+            "traveler": {
+              "name": "Test Traveler Four",
+              "email": "t4@example.com",
+              "employee_id": "00004",
+              "department": "Finance"
+            },
+            "trip": {
+              "origin": "JFK",
+              "destination": "SFO",
+              "trip_type": "one_way",
+              "departure_date": "2026-09-10",
+              "return_date": null,
+              "passengers": [
+                {
+                  "count": 1,
+                  "type": "adult"
+                }
+              ],
+              "travel_class": "first",
+              "trip_purpose": "client_meeting"
+            },
+            "missing_fields": [],
+            "ready_for_policy": true
+          }
+        }
+      }
+    },
+    {
+      "eval_id": "no_fare_quote_escalates",
+      "conversation": [
+        {
+          "invocation_id": "policy-4",
+          "user_content": {
+            "role": "user",
+            "parts": [
+              {
+                "text": "The fare engine failed to price this trip. A2A request failed: Timeout Error: Client Request timed out. No fare quote is available.\n\nEvaluate this trip against corporate travel policy."
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "check_budget",
+                "args": {}
+              },
+              {
+                "name": "check_travel_class",
+                "args": {
+                  "requested_class": "economy"
+                }
+              },
+              {
+                "name": "check_advance_purchase",
+                "args": {
+                  "departure_date_str": "2026-09-15"
+                }
+              },
+              {
+                "name": "check_max_trip_duration",
+                "args": {
+                  "departure_date_str": "2026-09-15",
+                  "return_date_str": "2026-09-20"
+                }
+              }
+            ],
+            "tool_responses": []
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "{\"status\":\"needs_review\",\"reasons\":[\"no fare quote available; budget cannot be verified\",\"economy is within policy\",\"70 days in advance, meets 7 day minimum\",\"trip duration 5 days within 14 day limit\"],\"requires_manager_approval\":true}"
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "policy",
+        "user_id": "u-eval",
+        "state": {
+          "intake_output": {
+            "traveler": {
+              "name": "Test Traveler",
+              "email": "test.traveler@example.com",
+              "employee_id": "00001",
+              "department": "Engineering"
+            },
+            "trip": {
+              "origin": "JFK",
+              "destination": "LAX",
+              "trip_type": "round_trip",
+              "departure_date": "2026-09-15",
+              "return_date": "2026-09-20",
+              "passengers": [
+                {
+                  "count": 1,
+                  "type": "adult"
+                }
+              ],
+              "travel_class": "economy",
+              "trip_purpose": "client_meeting"
+            },
+            "missing_fields": [],
+            "ready_for_policy": true
+          }
+        }
+      }
+    },
+    {
+      "eval_id": "multi_passenger_journey_total_fidelity",
+      "conversation": [
+        {
+          "invocation_id": "policy-5",
+          "user_content": {
+            "role": "user",
+            "parts": [
+              {
+                "text": "Here is the fare engine's response:\n{\"journey_type\":\"round_trip\",\"base_fare\":1436.02,\"taxes\":[{\"code\":\"US\",\"amount\":42.2,\"name\":\"U.S. International Departure Tax\"},{\"code\":\"XT\",\"amount\":56.11,\"name\":\"Foreign Arrival/Misc Taxes\"},{\"code\":\"AY\",\"amount\":11.2,\"name\":\"September 11th Security Fee\"},{\"code\":\"US\",\"amount\":21.1,\"name\":\"U.S. International Departure Tax\"},{\"code\":\"XT\",\"amount\":24.79,\"name\":\"Foreign Arrival/Misc Taxes\"},{\"code\":\"AY\",\"amount\":5.6,\"name\":\"September 11th Security Fee\"},{\"code\":\"US\",\"amount\":42.2,\"name\":\"U.S. International Departure Tax\"},{\"code\":\"XT\",\"amount\":56.11,\"name\":\"Foreign Arrival/Misc Taxes\"},{\"code\":\"AY\",\"amount\":11.2,\"name\":\"September 11th Security Fee\"},{\"code\":\"US\",\"amount\":21.1,\"name\":\"U.S. International Departure Tax\"},{\"code\":\"XT\",\"amount\":24.79,\"name\":\"Foreign Arrival/Misc Taxes\"},{\"code\":\"AY\",\"amount\":5.6,\"name\":\"September 11th Security Fee\"}],\"total_fare\":1758.02,\"currency\":\"USD\",\"fare_components\":[{\"direction\":\"outbound\",\"base_fare\":718.01,\"booking_class\":\"G\",\"fare_basis_code\":\"EGSI05\",\"fare_rules\":{\"refundable\":false,\"changeable\":false,\"advance_purchase_min\":21}},{\"direction\":\"return\",\"base_fare\":718.01,\"booking_class\":\"G\",\"fare_basis_code\":\"EGSI05\",\"fare_rules\":{\"refundable\":false,\"changeable\":false,\"advance_purchase_min\":21}}],\"pricing_breakdown\":[\"Outbound base fare: 3442 miles * $0.0862/mile = $296.70\",\"Outbound advance purchase discount (63 days): -$35.60 (12%)\",\"Outbound 2 adult(s): $522.19\",\"Outbound U.S. International Departure Tax (adult): $42.20\",\"Outbound Foreign Arrival/Misc Taxes (adult): $56.11\",\"Outbound September 11th Security Fee (adult): $11.20\",\"Outbound 1 child(ren): $195.82\",\"Outbound U.S. International Departure Tax (child): $21.10\",\"Outbound Foreign Arrival/Misc Taxes (child): $24.79\",\"Outbound September 11th Security Fee (child): $5.60\",\"Return base fare: 3442 miles * $0.0862/mile = $296.70\",\"Return advance purchase discount (73 days): -$35.60 (12%)\",\"Return 2 adult(s): $522.19\",\"Return U.S. International Departure Tax (adult): $42.20\",\"Return Foreign Arrival/Misc Taxes (adult): $56.11\",\"Return September 11th Security Fee (adult): $11.20\",\"Return 1 child(ren): $195.82\",\"Return U.S. International Departure Tax (child): $21.10\",\"Return Foreign Arrival/Misc Taxes (child): $24.79\",\"Return September 11th Security Fee (child): $5.60\",\"Journey total: $1758.02\"],\"quote_id\":\"03aba1f8e72183ccbc576e92acb30521\",\"expires_at\":\"2026-07-09T02:36:30Z\"}\n\nEvaluate this trip against corporate travel policy."
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "check_budget",
+                "args": {
+                  "total_fare": 1758.02
+                }
+              },
+              {
+                "name": "check_travel_class",
+                "args": {
+                  "requested_class": "economy"
+                }
+              },
+              {
+                "name": "check_advance_purchase",
+                "args": {
+                  "departure_date_str": "2026-09-08"
+                }
+              },
+              {
+                "name": "check_max_trip_duration",
+                "args": {
+                  "departure_date_str": "2026-09-08",
+                  "return_date_str": "2026-09-18"
+                }
+              }
+            ],
+            "tool_responses": []
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "{\"status\":\"approved\",\"reasons\":[\"total fare $1758.02 within $2000.00 trip budget cap\",\"economy is within policy\",\"63 days in advance, meets 7 day minimum\",\"trip duration 10 days within 14 day limit\"],\"requires_manager_approval\":false}"
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "policy",
+        "user_id": "u-eval",
+        "state": {
+          "intake_output": {
+            "traveler": {
+              "name": "Test Traveler Five",
+              "email": "t5@example.com",
+              "employee_id": "00005",
+              "department": "Marketing"
+            },
+            "trip": {
+              "origin": "JFK",
+              "destination": "LHR",
+              "trip_type": "round_trip",
+              "departure_date": "2026-09-08",
+              "return_date": "2026-09-18",
+              "passengers": [
+                {
+                  "count": 2,
+                  "type": "adult"
+                },
+                {
+                  "count": 1,
+                  "type": "child"
+                }
+              ],
+              "travel_class": "economy",
+              "trip_purpose": "conference"
+            },
+            "missing_fields": [],
+            "ready_for_policy": true
+          }
+        }
+      }
+    }
+  ]
+}

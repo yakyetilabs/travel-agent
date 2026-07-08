@@ -53,7 +53,7 @@ jobs:
       # AgentEvaluator, which asserts on failures (and auto-discovers
       # eval/test_config.json). RUN_ADK_EVALS=1 opts in the model-in-the-loop
       # tests that the default test job skips.
-      - name: ADK evals (intake, fare_prep)
+      - name: ADK evals (intake, fare_prep, policy)
         env:
           GOOGLE_GENAI_USE_VERTEXAI: "TRUE"
           GOOGLE_CLOUD_PROJECT: ${{ vars.GCP_PROJECT }}
