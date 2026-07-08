@@ -1,5 +1,7 @@
 from google.adk.agents import LlmAgent
 
+from agents.model import gemini_flash
+
 from .schemas import IntakeOutput
 
 INSTRUCTION = """\
@@ -36,7 +38,7 @@ Rules:
 
 root_agent = LlmAgent(
     name="intake_agent",
-    model="gemini-2.5-flash",
+    model=gemini_flash,
     instruction=INSTRUCTION,
     output_schema=IntakeOutput,
     output_key="intake_output",

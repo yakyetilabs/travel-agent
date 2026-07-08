@@ -21,6 +21,8 @@ so the orchestrator pipeline and `adk run agents/finalizer` are unchanged.
 
 from google.adk.agents import LlmAgent, SequentialAgent
 
+from agents.model import gemini_flash
+
 from .assembler import SUMMARY_STATE_KEY, FinalizerAssembler
 
 SUMMARY_INSTRUCTION = """\
@@ -46,7 +48,7 @@ every structured field and attaches your summary verbatim.
 
 summary_writer = LlmAgent(
     name="summary_writer",
-    model="gemini-2.5-flash",
+    model=gemini_flash,
     instruction=SUMMARY_INSTRUCTION,
     output_key=SUMMARY_STATE_KEY,
 )

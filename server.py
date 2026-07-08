@@ -1,5 +1,7 @@
 from google.adk.cli.fast_api import get_fast_api_app
 
+from model_errors import install_model_error_handler
+
 app = get_fast_api_app(
     agents_dir="agents",
     web=True,
@@ -17,3 +19,9 @@ app = get_fast_api_app(
     # public with --allow-unauthenticated, tighten this to the known origins.)
     allow_origins=["*"],
 )
+
+# A transient Vertex 429 (dynamic shared quota) that exhausts the per-agent retry
+# budget in agents/model.py would otherwise surface as a 500 stack trace on /run.
+# Degrade it to a structured, retryable 503 instead (see model_errors.py for the
+# streaming caveat).
+install_model_error_handler(app)

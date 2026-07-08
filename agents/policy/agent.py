@@ -1,5 +1,6 @@
 from google.adk.agents import LlmAgent
 
+from agents.model import gemini_flash
 from tools.policy import (
     check_advance_purchase,
     check_budget,
@@ -59,7 +60,7 @@ Process:
 
 root_agent = LlmAgent(
     name="policy_agent",
-    model="gemini-2.5-flash",
+    model=gemini_flash,
     instruction=INSTRUCTION,
     tools=[
         check_budget,

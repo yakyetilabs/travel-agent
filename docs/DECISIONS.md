@@ -116,3 +116,32 @@ The finalizer stage fell from ~11.83s (the previous single-`LlmAgent` transcript
 Of that, the pure-Python `finalizer_assembler` contributes 0.00s (sub-10ms); the residual ~3.1s is entirely `summary_writer`'s short prose call, which is the only generative work left.
 End-to-end latency dropped from ~30s to ~20s, and because the finalizer accounted for nearly the whole gap, removing the LLM copy path recovered most of the pipeline's latency as a side effect of the correctness fix.
 The same run confirmed `fare_components[*].fare_rules` now arrives as a populated object rather than `null`, closing the production bug that motivated the decision.
+
+---
+
+## 5. Explicit model retry budget, with an honest give-up at the boundary
+
+**Decision.**
+Define the Gemini model once (`agents/model.py`) with an explicit `HttpRetryOptions` retry budget - four attempts (one initial call plus three retries), exponential backoff of roughly 1s, 2s, 4s with full jitter, capped at 16s, over the transient status set (429, 408, and the retryable 5xx) - and import that single instance into every LLM agent (`intake`, `fare_prep`, `policy`, `summary_writer`).
+When the budget is exhausted the serving layer (`model_errors.py`) translates the underlying `google.genai.errors.APIError` into a structured, retryable HTTP response: `503 {"error": "model_busy", "retryable": true}` for a 429, and `503 {"error": "model_unavailable", ...}` for a retryable 5xx, rather than letting it surface as a 500 stack trace.
+
+**Context.**
+Gemini 2.5 Flash runs under Vertex AI's dynamic shared quota and has no dedicated capacity, so a `429 RESOURCE_EXHAUSTED` is transient regional contention, not a client error.
+Passing the bare string `model="gemini-2.5-flash"` leaves `retry_options` unset, and google-genai then configures its retry to stop after a single attempt (`retry_args(None)` maps to `stop_after_attempt(1)`), so there is effectively no retry and one blip failed the whole run with a stack trace (observed 2026-07-08: a 429 at intake).
+Retrying at the model layer, from one shared definition, means a blip is absorbed inside an agent's turn and every agent inherits the same policy from a single source of truth.
+
+**Rejected alternatives.**
+- Per-agent retry configuration.
+  Rejected: four copies of the same policy drift out of sync; one shared model instance is the single knob.
+- Degrading an exhausted 429 to a `needs_review` approval record.
+  Rejected as dishonest: a 429 at intake means there is no data to judge, so a manufactured verdict would misrepresent an infrastructure outage as a policy outcome (the same stance decision 3 takes on unreadable input, which never becomes an approval).
+  The caller gets a retryable error instead.
+- Rewriting the streaming (`/run_sse`) error into the same envelope.
+  Rejected for coupling: ADK's SSE handler already catches exceptions inside the stream and emits them as an inline `{"error": ...}` event after the 200 response has started, so a FastAPI exception handler cannot restyle that status.
+  The Dev UI therefore already shows an error event rather than a stack trace; matching the envelope there would mean re-implementing ADK's route for little gain, so the structured 503 covers the non-streaming `/run` path that programmatic callers use.
+
+**Consequences.**
+Transient contention is now invisible to the caller within the retry budget, and a sustained outage returns a clean, retryable 503 with a `Retry-After` hint, never a stack trace and never a fabricated approval.
+The budget is deliberately conservative at four attempts: the value is explicit 429 coverage plus real backoff and jitter, not the attempt count, so it can be raised if 429s recur.
+The fare engine's inbound LLM has the same exposure and is tracked as a separate follow-up in the engine repository; the orchestrator half lands here.
+The behavior is pinned in `tests/test_model_resilience.py` (the retry configuration, every agent sharing it, recover-on-transient and give-up-on-persistent, and the 503 envelope), and the reader-facing gap in `README.md` is updated to reflect the orchestrator half being closed.
