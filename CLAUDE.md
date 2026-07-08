@@ -87,6 +87,11 @@ real addresses, or anything that resembles real PII. This is non-negotiable.
 - Don't restructure the agents/ layout — `adk run` depends on it.
 - Don't commit `.env` or anything with real PII.
 - Don't write integration tests that hit live APIs in CI without an opt-in flag.
+- Don't trust the machine's ambient gcloud config: dev machines switch between
+  multiple GCP projects, so the active project may be the wrong one. Every
+  gcloud command must pass --project explicitly (value: GOOGLE_CLOUD_PROJECT in
+  .env), or activate this project's named config first
+  (`gcloud config configurations activate travel`).
 
 ## References for further detail
 
