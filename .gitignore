@@ -9,7 +9,7 @@ wheels/
 # Virtual environments
 .venv
 
-# Secrets — never commit (see CLAUDE.md "Data hygiene")
+# Secrets - never commit (keys, credentials, PII)
 .env
 .env.*
 !.env.example
@@ -27,5 +27,6 @@ sample_data/real/
 # ADK local eval history (written by `adk eval` runs)
 .adk/
 
-# Session working notes — never part of the portfolio repo
+# Agent-facing working files - kept local, not part of the portfolio repo
 HANDOFF.md
+CLAUDE.md
