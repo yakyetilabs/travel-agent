@@ -80,12 +80,14 @@ structured-output mode, which **disables tool calling and `transfer_to_agent`**.
 **Fix.** Split responsibilities:
 - Tool-using agents emit JSON-as-text and write to state via `output_key` (no
   `output_schema`). This is what `pricing`, `policy`, and `fare_prep` do.
-- A final agent with `output_schema` (no tools) validates the final shape.
+- A final agent with `output_schema` (no tools) can validate the final shape.
+  The orchestrator's finalizer originally did exactly that; it has since gone further and assembles the final output in code with no LLM at all (lesson 8).
 
 **Concept.** This is *why* the orchestrator ends in a **finalizer**, and why the
 engine's v1 pipeline was pricing → formatter. (The engine has since replaced the
-formatter with a deterministic passthrough — fare integrity beat schema
-enforcement; see engine DECISIONS.md §6 — but the constraint shaped the split.)
+formatter with a deterministic passthrough - fare integrity beat schema
+enforcement; see the engine repo's DECISIONS.md §6 - and the orchestrator's
+finalizer later followed the same path; see lesson 8 below.)
 The architecture is shaped by this constraint, not by preference.
 
 ### 5. Circular import when an ADK multi-agent app loads
@@ -142,7 +144,22 @@ policy → finalizer`. Now policy reads the real quoted fare.
 Order stages so each has the inputs its tools require; don't paper over a missing
 input with a stub.
 
-### 8. The human vocabulary ≠ the engine vocabulary
+### 8. Structured output through an LLM is transcription, and transcription is lossy
+
+**Symptom.** The engine returned populated `fare_components[*].fare_rules`; the finalizer's `PreTripApprovalOutput` carried `fare_rules: null` (production invocation e-73f1abbe) or the same object retyped as a JSON string (local repro), while burning ~1200 thought tokens on a copy job.
+
+**Cause.** The old finalizer was an `LlmAgent` with `output_schema` that re-emitted every upstream field.
+`fare_quote` is typed as a bare `dict`, so schema-constrained decoding has no schema for the objects nested inside it - the copy channel is probabilistic exactly where the data is deepest.
+"Copy verbatim" in a prompt cannot fix this; the production trace is the counterexample.
+
+**Fix.** Split the finalizer: `summary_writer` (LLM) writes only the prose summary; `finalizer_assembler` (a custom `BaseAgent` with no model) assembles the record in pure Python, scoped to the current invocation's events.
+The decision itself and the alternatives we rejected (callback-patching the fields, or hardening the "copy verbatim" prompt) are recorded in [`DECISIONS.md`](DECISIONS.md) §4.
+
+**Concept.** Never route data through a model that code can move verbatim.
+An LLM in the copy path adds cost and transcription variance, and it can silently drop fields its schema types as opaque.
+The LLM's job is the genuinely generative field; everything else is data that already exists.
+
+### 9. The human vocabulary ≠ the engine vocabulary
 
 **Symptom.** The engine needs `base_distance_miles`, `advance_purchase_days`,
 `route_type`, `season_code`, `booking_class`; intake only collects airports,
@@ -163,7 +180,7 @@ you hope the LLM gets right.
 
 ## Cloud Run deployment
 
-### 9. Buildpack fails: `MANIFEST_UNKNOWN: Failed to fetch "3.12.11"`
+### 10. Buildpack fails: `MANIFEST_UNKNOWN: Failed to fetch "3.12.11"`
 
 **Symptom.** `gcloud run deploy --source .` fails in the build, before installing
 deps.
@@ -180,7 +197,7 @@ is present, `--source .` uses it automatically.
 non-standard package managers). A Dockerfile trades convenience for **control and
 reproducibility** — usually the right call for a portfolio/production service.
 
-### 10. Private Cloud Run service: getting an ID token to call it
+### 11. Private Cloud Run service: getting an ID token to call it
 
 **Symptom.** Calling a `--no-allow-unauthenticated` service returns 401/403.
 
@@ -195,7 +212,7 @@ proxy` handles auth for you.
 **Concept.** Private Cloud Run auth = **ID token (aud = service URL) + IAM
 `run.invoker`**. Two independent things; both required.
 
-### 11. Local dev breaks because the client always tries to mint a token
+### 12. Local dev breaks because the client always tries to mint a token
 
 **Symptom.** Running the orchestrator locally against a local engine fails trying
 to fetch a GCP ID token.
@@ -212,7 +229,7 @@ Branch on environment so local dev stays frictionless.
 
 ## CI/CD on GCP
 
-### 12. CI deploy: `caller does not have permission to act as service account …`
+### 13. CI deploy: `caller does not have permission to act as service account …`
 
 **Symptom.** Manual `gcloud run deploy` works from your laptop; the *identical*
 command fails in GitHub Actions with `act as service account`.
@@ -228,7 +245,7 @@ the build SA. (It worked manually because you're an owner.)
 Cloud Run source builds need **two** act-as grants: the **runtime** SA (`--service-account`)
 *and* the **build** SA (Cloud Build). Enumerate every identity a command assumes.
 
-### 13. Keyless CI auth with Workload Identity Federation (no JSON keys)
+### 14. Keyless CI auth with Workload Identity Federation (no JSON keys)
 
 **Symptom.** You want CI to deploy without committing a service-account key.
 
@@ -246,7 +263,7 @@ federation** is the modern, keyless pattern for CI → cloud.
 
 ## Tooling / dev-loop
 
-### 14. ADK dev UI returns 403 on session create behind the Cloud Run proxy
+### 15. ADK dev UI returns 403 on session create behind the Cloud Run proxy
 
 **Symptom.** `gcloud run services proxy` works; the browser dev UI shows "Failed
 to create session" (`POST …/sessions` → 403), but the **same call via `curl`
