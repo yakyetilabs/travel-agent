@@ -1,5 +1,6 @@
 from google.adk.agents import LlmAgent
 
+from agents.model import gemini_flash
 from tools.fare_request import build_fare_request
 
 INSTRUCTION = """\
@@ -34,7 +35,7 @@ an error you should pass through.
 
 root_agent = LlmAgent(
     name="fare_prep_agent",
-    model="gemini-2.5-flash",
+    model=gemini_flash,
     instruction=INSTRUCTION,
     tools=[build_fare_request],
     output_key="fare_request",
