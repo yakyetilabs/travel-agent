@@ -109,3 +109,10 @@ Extraction is scoped to the current invocation's `fare_engine` event, so a stale
 Unreadable policy output degrades to `needs_review` (never an approval), mirroring the malformed-counts-as-fail stance of decision 3.
 This completes the "deterministic core, LLM shell" thesis end to end: it is the same cure the pricing engine applied to its own outbound path when it replaced a formatter LLM with a deterministic passthrough (engine repo `DECISIONS.md` §6), now applied on the orchestrator side.
 The assembly logic is pure functions unit-tested in `tests/test_finalizer_assembler.py`; the lesson behind the bug is recorded in `LESSONS.md` lesson 8.
+
+**Measured impact.**
+Verified in production on 2026-07-08 against the deployed orchestrator, three happy-path runs through the authenticated proxy.
+The finalizer stage fell from ~11.83s (the previous single-`LlmAgent` transcription) to 3.11s on average.
+Of that, the pure-Python `finalizer_assembler` contributes 0.00s (sub-10ms); the residual ~3.1s is entirely `summary_writer`'s short prose call, which is the only generative work left.
+End-to-end latency dropped from ~30s to ~20s, and because the finalizer accounted for nearly the whole gap, removing the LLM copy path recovered most of the pipeline's latency as a side effect of the correctness fix.
+The same run confirmed `fare_components[*].fare_rules` now arrives as a populated object rather than `null`, closing the production bug that motivated the decision.

@@ -9,6 +9,16 @@ The pricing half - a standalone Go A2A microservice - is in the [travel-fare-eng
 > - 🧭 **This repo (start here):** [travel-agent](https://github.com/yakyetilabs/travel-agent)
 > - ⚙️ **Pricing engine:** [travel-fare-engine](https://github.com/yakyetilabs/travel-fare-engine)
 
+## Demo
+
+A natural-language trip request runs through five specialist agents - intake, fare_prep, the remote fare engine, policy, and the finalizer - and comes out as a structured, policy-checked authorization built on the real fare quote. The final record is assembled in code, not transcribed by an LLM.
+
+![The orchestrator running end to end: the agent graph fires intake, fare_prep, fare_engine, policy, and the finalizer, producing an approved decision with a populated fare quote (journey total $288.90)](docs/demo-pipeline.gif)
+
+Under the hood, the execution trace. The remote fare engine is the dominant span, while policy's deterministic checks (`check_budget`, `check_advance_purchase`, and the rest) resolve in microseconds - the "deterministic core, LLM shell" design, visible in the timings.
+
+![Execution trace waterfall: total invocation latency 18.86s, the remote fare_engine A2A call as the slowest span, and policy's tool-based checks completing in microseconds](docs/demo-trace.gif)
+
 ## Architecture
 
 ```
@@ -152,7 +162,9 @@ The orchestrator’s runtime service account must hold `roles/run.invoker` on th
 - **No persistence.** Quotes and decisions are returned to the caller but not stored. A production system would persist the full decision in a database for compliance and auditing.
 - **No audit log.** Every authorization decision should be recorded with inputs, outputs, and decision timestamps in tamper‑evident storage.
 - **Simplified fare engine.** The pricing engine uses a small set of hard‑coded tables. A real deployment would integrate with live ATPCO fares, corporate negotiated rates, or a GDS.
+- **Intake readiness is reported, not enforced.** The intake agent emits a `ready_for_policy` flag and a `missing_fields` list when a request is incomplete, but the `SequentialAgent` orchestrator does not gate on it, so a partial request still flows downstream. The natural extension is to wrap intake in a clarification `LoopAgent` that repeats until `ready_for_policy=True` before pricing runs.
 - **No automated rollback.** Cloud Run’s revision model keeps the previous version serving on failure, but the pipeline does not automatically revert or alert on smoke‑test failure.
+- **No backoff for model rate limits (429 / dynamic shared quota).** Gemini 2.5 Flash runs under Vertex AI's dynamic shared quota, so under regional contention a call is throttled (slow) or rejected with `429 RESOURCE_EXHAUSTED`; the SDK retries briefly and then the whole invocation fails with a stack trace. A user‑facing deployment needs longer exponential backoff with jitter and a graceful degrade ("model busy, try again") instead of a hard failure, applied both in the orchestrator agents and in the engine's inbound LLM. Provisioned Throughput would remove the contention entirely but at a fixed monthly cost.
 - **Fare hold not honored.** Quote IDs are returned with an expiration (the engine's fixed fare-hold window), but there is no mechanism to guarantee the same fare if the user returns within the window.
 - **Ingress for CI.** Cloud Run ingress is set to all (but still requires authentication) to allow GitHub‑hosted runners to reach the deployed service. A stricter posture would move smoke tests inside the project.
 
