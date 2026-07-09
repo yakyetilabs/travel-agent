@@ -35,16 +35,46 @@ SUMMARY_STATE_KEY = "approval_summary"
 OUTPUT_STATE_KEY = "orchestrator_output"
 
 
+def _quote_from_part(part: types.Part) -> dict | None:
+    """Return the FareQuote dict a single fare_engine part carries, or None.
+
+    The engine's result reaches the finalizer in one of two shapes, depending
+    on how the pipeline runs the remote agent:
+
+    - as a function response, when the Workflow graph runs `fare_engine` as a
+      node and models the A2A round trip as a `compute_fare` tool call - the
+      quote is the response payload, already a dict;
+    - as a model text part carrying the FareQuote JSON, the flatter shape a
+      plain agent hand-off produces.
+
+    Both are accepted so the assembler is indifferent to the orchestration
+    mechanism. The `total_fare` marker is what makes a payload a quote rather
+    than a JSON-shaped engine error; a thought part is never a quote.
+    """
+    response = part.function_response
+    if response is not None and isinstance(response.response, dict):
+        if "total_fare" in response.response:
+            return response.response
+    if part.text and not part.thought:
+        try:
+            obj = json.loads(part.text)
+        except ValueError:
+            return None
+        if isinstance(obj, dict) and "total_fare" in obj:
+            return obj
+    return None
+
+
 def extract_fare_quote(
     events: Sequence[Event], invocation_id: str
 ) -> dict | None:
     """Return the FareQuote dict from THIS invocation's fare_engine response.
 
     Scanning is invocation-scoped: a quote from an earlier turn in the same
-    session must never leak into a later run (the stale-quote fix). The
-    `total_fare` marker check keeps a JSON-shaped engine error from being
-    mistaken for a quote. On absence or any parse failure, returns None -
-    the record then carries fare_quote=null rather than a guess.
+    session must never leak into a later run (the stale-quote fix). Each
+    fare_engine part is checked for a quote in either transport shape (see
+    `_quote_from_part`). On absence or any parse failure, returns None - the
+    record then carries fare_quote=null rather than a guess.
     """
     for event in reversed(events):
         if event.invocation_id != invocation_id:
@@ -54,14 +84,9 @@ def extract_fare_quote(
         if not event.content or not event.content.parts:
             continue
         for part in event.content.parts:
-            if not part.text or part.thought:
-                continue
-            try:
-                obj = json.loads(part.text)
-            except ValueError:
-                continue
-            if isinstance(obj, dict) and "total_fare" in obj:
-                return obj
+            quote = _quote_from_part(part)
+            if quote is not None:
+                return quote
     return None
 
 

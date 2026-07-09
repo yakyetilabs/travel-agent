@@ -15,11 +15,13 @@ were probabilistically nulled or stringified in transit (production
 invocation e-73f1abbe). Assembly in code removes that copy path instead of
 supervising it.
 
-`root_agent` stays a single importable agent named "orchestrator_finalizer"
-so the orchestrator pipeline and `adk run agents/finalizer` are unchanged.
+`root_agent` stays a single importable node named "orchestrator_finalizer"
+(now an ADK Workflow graph, formerly a SequentialAgent) so the orchestrator
+pipeline and `adk run agents/finalizer` are unchanged.
 """
 
-from google.adk.agents import LlmAgent, SequentialAgent
+from google.adk.agents import LlmAgent
+from google.adk.workflow import START, Workflow
 
 from agents.model import gemini_flash
 
@@ -53,10 +55,12 @@ summary_writer = LlmAgent(
     output_key=SUMMARY_STATE_KEY,
 )
 
-root_agent = SequentialAgent(
+# A two-node Workflow graph replaces the deprecated SequentialAgent. The chain
+# tuple (START, a, b) expands to the edges START -> summary_writer -> assembler;
+# ADK agents are already graph nodes (BaseAgent subclasses BaseNode), so both
+# stages drop in directly. The assembler, being the terminal node, owns the
+# final approval record the workflow emits.
+root_agent = Workflow(
     name="orchestrator_finalizer",
-    sub_agents=[
-        summary_writer,
-        FinalizerAssembler(name="finalizer_assembler"),
-    ],
+    edges=[(START, summary_writer, FinalizerAssembler(name="finalizer_assembler"))],
 )

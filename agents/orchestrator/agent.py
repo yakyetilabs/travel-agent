@@ -8,8 +8,8 @@ from urllib.parse import urlparse
 
 import google.auth.transport.requests
 import httpx
-from google.adk.agents import LlmAgent, SequentialAgent
 from google.adk.agents.remote_a2a_agent import RemoteA2aAgent
+from google.adk.workflow import START, Workflow
 from google.genai import types
 from google.oauth2 import id_token as oauth_id_token
 
@@ -31,10 +31,14 @@ class _GCPIdTokenAuth(httpx.Auth):
         self._expiry: float = 0.0
 
     def _refresh(self) -> None:
-        self._token = oauth_id_token.fetch_id_token(self._auth_req, self._audience)
-        payload_b64 = self._token.split(".")[1]
+        token = oauth_id_token.fetch_id_token(self._auth_req, self._audience)
+        if not token:
+            raise RuntimeError(f"could not mint an ID token for {self._audience}")
+
+        payload_b64 = token.split(".")[1]
         payload_b64 += "=" * (-len(payload_b64) % 4)
         self._expiry = float(json.loads(base64.urlsafe_b64decode(payload_b64))["exp"])
+        self._token = token
 
     def auth_flow(
         self, request: httpx.Request
@@ -56,6 +60,7 @@ def _is_local(url: str) -> bool:
     unauthenticated and no Cloud Run ID token can (or should) be minted."""
     return urlparse(url).hostname in ("localhost", "127.0.0.1", "::1", "[::1]")
 
+
 # Local dev hits an unauthenticated engine, so skip ID-token auth (fetching one
 # would require GCP credentials and fail). Deployed engines run
 # --no-allow-unauthenticated, so every call carries an ID token.
@@ -64,7 +69,9 @@ def _is_local(url: str) -> bool:
 # complete wastes the quote (observed: a 66s engine response vs a 60s client cap).
 _timeout = httpx.Timeout(120.0, connect=10.0)
 if _is_local(_fare_engine_url):
-    logger.info("FARE_ENGINE_URL is local (%s); calling without ID-token auth", _fare_engine_url)
+    logger.info(
+        "FARE_ENGINE_URL is local (%s); calling without ID-token auth", _fare_engine_url
+    )
     _client = httpx.AsyncClient(timeout=_timeout)
 else:
     _client = httpx.AsyncClient(
@@ -79,9 +86,22 @@ fare_engine = RemoteA2aAgent(
 )
 
 # Pipeline order matters: fare_prep derives the engine's request from intake, the
-# remote fare_engine prices it, and ONLY THEN does policy run — so the budget check
+# remote fare_engine prices it, and ONLY THEN does policy run - so the budget check
 # can act on the real quoted total_fare instead of guessing before pricing exists.
-root_agent = SequentialAgent(
+# The chain tuple (START, a, b, ...) expands to a linear edge chain
+# START -> intake -> fare_prep -> fare_engine -> policy -> finalizer. Every stage
+# is already a graph node (ADK agents subclass BaseNode), including the remote
+# fare_engine and the finalizer, itself a nested Workflow.
+root_agent = Workflow(
     name="orchestrator_agent",
-    sub_agents=[intake_root, fare_prep_root, fare_engine, policy_root, finalizer_root],
+    edges=[
+        (
+            START,
+            intake_root,
+            fare_prep_root,
+            fare_engine,
+            policy_root,
+            finalizer_root,
+        )
+    ],
 )
