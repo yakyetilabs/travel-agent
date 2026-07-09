@@ -125,6 +125,31 @@ def engine_event(
     )
 
 
+def engine_function_response_event(
+    quote: dict, invocation_id: str = "e-current", author: str = FARE_ENGINE_AUTHOR
+) -> Event:
+    """A fare_engine event in the Workflow-graph shape: the A2A round trip
+    modeled as a `compute_fare` tool call (function call + function response),
+    the quote riding in the response payload rather than a text part."""
+    return Event(
+        invocation_id=invocation_id,
+        author=author,
+        content=types.Content(
+            role="model",
+            parts=[
+                types.Part(
+                    function_call=types.FunctionCall(name="compute_fare", args={})
+                ),
+                types.Part(
+                    function_response=types.FunctionResponse(
+                        name="compute_fare", response=quote
+                    )
+                ),
+            ],
+        ),
+    )
+
+
 # --- extract_fare_quote ---
 
 
@@ -138,6 +163,26 @@ def test_extract_returns_quote_verbatim_including_fare_rules():
             "changeable": False,
             "refundable": False,
         }
+
+
+def test_extract_reads_quote_from_workflow_function_response():
+    # The Workflow graph delivers the engine result as a compute_fare function
+    # response, not a text part; the quote (fare_rules included) must survive.
+    events = [engine_function_response_event(ENGINE_QUOTE)]
+    quote = extract_fare_quote(events, "e-current")
+    assert quote == ENGINE_QUOTE
+    for component in quote["fare_components"]:
+        assert component["fare_rules"] == {
+            "advance_purchase_min": 21,
+            "changeable": False,
+            "refundable": False,
+        }
+
+
+def test_extract_function_response_is_invocation_scoped():
+    stale = dict(ENGINE_QUOTE, quote_id="stale-quote", total_fare=999.99)
+    events = [engine_function_response_event(stale, invocation_id="e-older")]
+    assert extract_fare_quote(events, "e-current") is None
 
 
 def test_extract_ignores_stale_quote_from_older_invocation():

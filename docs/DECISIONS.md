@@ -145,3 +145,56 @@ Transient contention is now invisible to the caller within the retry budget, and
 The budget is deliberately conservative at four attempts: the value is explicit 429 coverage plus real backoff and jitter, not the attempt count, so it can be raised if 429s recur.
 The fare engine's inbound LLM has the same exposure and is tracked as a separate follow-up in the engine repository; the orchestrator half lands here.
 The behavior is pinned in `tests/test_model_resilience.py` (the retry configuration, every agent sharing it, recover-on-transient and give-up-on-persistent, and the 503 envelope), and the reader-facing gap in `README.md` is updated to reflect the orchestrator half being closed.
+
+---
+
+## 6. External reviewer access via IAP enabled directly on Cloud Run
+
+**Decision.**
+Give external reviewers access to the private `travel-prequal` service by enabling Identity-Aware Proxy (IAP) directly on the Cloud Run service, rather than through an external HTTPS load balancer or a custom-built front-end.
+Personal Google accounts are admitted through a custom OAuth client on an External consent screen, each reviewer is granted `roles/iap.httpsResourceAccessor` individually, and the surface they reach is the ADK Dev UI.
+
+**Context.**
+The service runs private (`--no-allow-unauthenticated`), so a portfolio demo needs a link a reviewer can open with their own Google identity, without the project minting credentials or building a sign-in.
+IAP provides that directly: Google's sign-in is the identity proof, and IAP checks it against an IAM allowlist before a request reaches the container, in front of every ingress path including the default `run.app` URL, so there is no unprotected side door.
+
+**Rejected alternatives.**
+- An external HTTPS load balancer with IAP on the backend service.
+  Rejected: it adds a serving component to operate for no capability that IAP directly on Cloud Run lacks.
+- A custom front-end gated by a shared access code.
+  Rejected: it moves authentication into code we would have to build and secure, and one shared code is a weaker control than per-identity Google sign-in.
+
+**Consequences.**
+Admitting external Gmail requires the consent screen set to External with a custom OAuth Web client, because the default Google-managed IAP client only admits accounts inside the project's organization, and this project has none.
+Reviewers are pre-provisioned, and the friction is deliberate: each email must be a Test user on the consent screen and hold `roles/iap.httpsResourceAccessor`, matching the exact account the person signs in with - the accepted trade for not building and defending a public front door.
+Verified end to end on 2026-07-08: an external Gmail reviewer signed in, reached the Dev UI, and ran the pipeline to an approved decision with a live fare quote, the agent events streaming in progressively, which confirms server-sent events are neither buffered nor broken by IAP.
+
+---
+
+## 7. The pipeline is an ADK Workflow graph, not a SequentialAgent
+
+**Decision.**
+Build both pipelines - the five-stage orchestrator and the two-stage finalizer - as ADK `Workflow` graphs rather than `SequentialAgent`s.
+Each stays a single linear chain expressed as one tuple from the `START` sentinel, and every existing stage is reused unchanged as a graph node.
+
+**Context.**
+ADK deprecates `SequentialAgent` in favor of `Workflow`, and the warning fires on every module load and every test run, which is visible noise in a project meant to read as polished.
+The standing rule is to move to the supported replacement rather than to silence the warning, so the question was only how large the move is.
+Read against the installed ADK source, `Workflow` is not a renamed `SequentialAgent` but a different engine: a graph of nodes and edges driven by a scheduler, where `SequentialAgent` was a fixed list run in order.
+The migration is small anyway, because `BaseAgent` now subclasses the graph's `BaseNode`, so every stage this pipeline already has - the intake, fare-prep and policy `LlmAgent`s, the remote fare engine, and the model-free assembler - is already a node and drops into a graph with no wrapper.
+A one-element chain tuple `(START, a, b, ...)` expands to the linear edges the old `sub_agents` list implied, so the graph still reads in pipeline order.
+The load-bearing entry points are unchanged: the ADK Runner, the `get_fast_api_app` agent loader that serves the Dev UI, and `adk run` all accept a `Workflow` root, and `LlmAgent` nodes still honor `output_key` and instruction state-templating, so the state hand-off the pipeline relies on is preserved.
+
+**Rejected alternatives.**
+- Silence the `DeprecationWarning` with a pytest or warnings filter.
+  Rejected: it hides the blemish instead of adopting the supported API and leaves the core of the system on a path the library has slated for removal.
+- Stay on `SequentialAgent` until it is actually removed.
+  Rejected: the pipeline is a plain linear chain today, which is the simplest it will ever be to move, and the warning is a quality signal a reviewer sees now.
+- Wire the graph from explicit `Edge(from, to)` objects.
+  Rejected as ceremony for a linear pipeline; the chain tuple is the library's intended shorthand and reads as the sequence itself, and explicit edges remain available the day the pipeline grows a branch.
+
+**Consequences.**
+The orchestration is a graph rather than a list: the stages are `root_agent.graph.nodes`, not `root_agent.sub_agents`, and the finalizer is a nested `Workflow` that is itself the orchestrator's terminal node, so the deterministic assembler stays the last thing the pipeline emits - the property §4 exists to guarantee.
+Running the engine as a graph node changed the shape of its result in the event stream, and this is the one real hazard the migration surfaced: the graph models the remote `fare_engine` round trip as a `compute_fare` tool call, so the FareQuote now arrives as a function response rather than the model text part the flat pipeline produced.
+The deterministic assembler reads the quote from the fare_engine event, so it now accepts either shape (`agents/finalizer/assembler.py`), and both are pinned in `tests/test_finalizer_assembler.py`; without that, `fare_quote` would serialize as null in production even though every unit test passed, which is exactly what the end-to-end run caught and the shape-blind tests did not.
+Verified end to end after the migration: the standard JFK-LAX query runs through the graph to an approved decision carrying the full $288.90 quote with `fare_rules` populated on both components, matching the result the SequentialAgent produced, and the deprecation warning is gone from module load and from the test suite.
