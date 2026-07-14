@@ -106,21 +106,29 @@ jobs:
           echo "url=${URL}" >> "$GITHUB_OUTPUT"
 
       - id: idtoken
-        name: Mint ID token for the smoke test
+        name: Mint ID token for the smoke test (IAP-fronted service)
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOY_SA }}
           token_format: id_token
-          id_token_audience: ${{ steps.svc.outputs.url }}
+          # travel-prequal is fronted by IAP (docs/DECISIONS.md section 6). IAP
+          # authenticates a programmatic caller by an OIDC token whose audience is
+          # the IAP OAuth client ID, NOT the Cloud Run service URL - a service-URL
+          # audience is rejected with "Invalid JWT audience". The deploy SA must
+          # also hold roles/iap.httpsResourceAccessor on the service.
+          id_token_audience: ${{ vars.GCP_IAP_CLIENT_ID }}
           id_token_include_email: true
 
-      - name: Smoke test (/list-apps includes orchestrator)
+      - name: Smoke test (/list-apps includes orchestrator, through IAP)
         run: |
           URL="${{ steps.svc.outputs.url }}"
-          BODY=$(curl -sS -H "Authorization: Bearer ${{ steps.idtoken.outputs.id_token }}" \
+          CODE=$(curl -sS -o /tmp/list-apps.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${{ steps.idtoken.outputs.id_token }}" \
             "${URL}/list-apps")
-          echo "list-apps: $BODY"
-          echo "$BODY" | jq -e 'index("orchestrator")' >/dev/null \
+          echo "HTTP ${CODE}:"; cat /tmp/list-apps.json; echo
+          [ "${CODE}" = "200" ] \
+            || { echo "smoke test: expected HTTP 200 through IAP, got ${CODE} (check the deploy SA's roles/iap.httpsResourceAccessor grant and GCP_IAP_CLIENT_ID)"; exit 1; }
+          jq -e 'index("orchestrator")' /tmp/list-apps.json >/dev/null \
             || { echo "orchestrator app not listed"; exit 1; }
           echo "Smoke test passed."
