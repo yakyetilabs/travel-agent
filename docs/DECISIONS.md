@@ -1,9 +1,9 @@
 # Travel Agent (Orchestrator) - Architecture Decision Record (ADR)
 
-Decisions we chose to make while building the orchestrator, with the reasoning and the alternatives we rejected.
+The decisions I chose to make while building the orchestrator, with the reasoning and the alternatives I rejected.
 
 This is the decisions-genre companion to [`LESSONS.md`](LESSONS.md).
-The split is deliberate: LESSONS records problems we ran into and did not foresee (retrospective); this file records choices we made on purpose (prospective), so the "why" behind the architecture has a home that is not a commit message.
+The split is deliberate: LESSONS records problems I ran into and did not foresee (retrospective); this file records choices I made on purpose (prospective), so the "why" behind the architecture has a home that is not a commit message.
 The pricing engine keeps its own ADR in the sibling repository (`travel-fare-engine/DECISIONS.md`); several decisions here are the orchestrator-side half of a decision recorded there, and are cross-referenced where that is the case.
 
 Reader docs - this file, [`LESSONS.md`](LESSONS.md), [`ARCHITECTURE.md`](ARCHITECTURE.md), and the top-level `README.md` - describe the system for humans and cross-reference each other.
@@ -60,7 +60,6 @@ See also `LESSONS.md` lesson 4.
 **Decision.**
 Every policy check returns one of three verdicts - `pass`, `needs_approval`, or `fail` - and the overall status is derived deterministically: any `fail` denies the trip; otherwise any `needs_approval` escalates it to `needs_review` with `requires_manager_approval=True`; otherwise it is approved.
 All thresholds (the $2000 trip budget cap, allowed cabins, the 7-day advance-purchase minimum, the 14-day duration limit) are module constants in `tools/policy.py`, taken as no tool parameter.
-Landed in commit `4b02042`.
 
 **Context.**
 Real pre-trip approval escalates out-of-policy requests to a manager rather than flat-denying everything unusual; a binary allow/deny cannot express "allowed with sign-off".
@@ -162,7 +161,7 @@ IAP provides that directly: Google's sign-in is the identity proof, and IAP chec
 - An external HTTPS load balancer with IAP on the backend service.
   Rejected: it adds a serving component to operate for no capability that IAP directly on Cloud Run lacks.
 - A custom front-end gated by a shared access code.
-  Rejected: it moves authentication into code we would have to build and secure, and one shared code is a weaker control than per-identity Google sign-in.
+  Rejected: it moves authentication into code I would have to build and secure, and one shared code is a weaker control than per-identity Google sign-in.
 
 **Consequences.**
 Admitting external Gmail requires the consent screen set to External with a custom OAuth Web client, because the default Google-managed IAP client only admits accounts inside the project's organization, and this project has none.

@@ -1,6 +1,6 @@
 # Lessons Learned — building & shipping a two-repo A2A system
 
-A field guide to the walls we hit building this system and how we got past them.
+A field guide to the walls I hit building this system and how I got past them.
 If you're learning **A2A**, **Google ADK**, or **deploying agents to Cloud Run +
 Vertex AI**, you will likely hit several of these — so each entry is written as
 *symptom → cause → fix → the concept underneath*.
@@ -37,14 +37,14 @@ for a compat/legacy layer before rewriting anything.
 **Symptom.** `Failed to validate agent card structure … skills[0].id Field
 required … url Field required`.
 
-**Cause.** Our hand-written `agent-card.json` didn't match the A2A **`AgentCard`**
+**Cause.** My hand-written `agent-card.json` didn't match the A2A **`AgentCard`**
 schema the client validates against. The real schema needs a **top-level `url`**
 (+ optional `preferredTransport`, `additionalInterfaces`) and skills with
-`id` + `name` + `description` + `tags`. Our card used a made-up
+`id` + `name` + `description` + `tags`. The card used a made-up
 `supportedInterfaces` field (silently ignored) and skills without `id`/`tags`.
 
 **Fix.** Match the real schema: top-level `url`, `preferredTransport: "JSONRPC"`,
-and `skills: [{ id, name, description, tags, ... }]`. We read the SDK's pydantic
+and `skills: [{ id, name, description, tags, ... }]`. I read the SDK's pydantic
 `AgentCard` model directly to get the exact required fields rather than guessing.
 
 **Concept.** The agent card is a **typed contract**, not free-form JSON. When in
@@ -107,7 +107,7 @@ turning the cycle fatal.
 it. A sub-agent must never import from its parent package.
 
 **Concept.** In a multi-agent package, dependencies should flow **parent →
-children**, never back. We verified the fix with an AST-based import-cycle check
+children**, never back. I verified the fix with an AST-based import-cycle check
 (stdlib only) — a cheap way to catch this class of bug without running the stack.
 
 ### 6. ADK apps are loaded by directory — mind the `__init__.py`
@@ -153,7 +153,7 @@ input with a stub.
 "Copy verbatim" in a prompt cannot fix this; the production trace is the counterexample.
 
 **Fix.** Split the finalizer: `summary_writer` (LLM) writes only the prose summary; `finalizer_assembler` (a custom `BaseAgent` with no model) assembles the record in pure Python, scoped to the current invocation's events.
-The decision itself and the alternatives we rejected (callback-patching the fields, or hardening the "copy verbatim" prompt) are recorded in [`DECISIONS.md`](DECISIONS.md) §4.
+The decision itself and the alternatives I rejected (callback-patching the fields, or hardening the "copy verbatim" prompt) are recorded in [`DECISIONS.md`](DECISIONS.md) §4.
 
 **Concept.** Never route data through a model that code can move verbatim.
 An LLM in the copy path adds cost and transcription variance, and it can silently drop fields its schema types as opaque.
@@ -306,7 +306,7 @@ including time. Freeze the domain's clock, not the process's.
 - **Read the dependency's source, don't guess.** Several fixes (the A2A method
   names, the AgentCard schema, the ADK FastAPI routes) came from reading the
   installed library, not documentation or memory.
-- **Verify before you redeploy.** We reproduced the import cycle with a stdlib
+- **Verify before you redeploy.** I reproduced the import cycle with a stdlib
   script and confirmed builder→engine compatibility offline before paying for a
   cloud build. Cheap local checks beat slow cloud round-trips.
 - **Peel the onion.** The A2A call failed for three *different* reasons in

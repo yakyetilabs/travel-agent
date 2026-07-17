@@ -26,7 +26,7 @@ documented there with fixes.
   needed if you want to run tests / run locally.
 - You do **not** need Docker locally — Cloud Build builds the images.
 - For local model calls, a **Gemini API key** (https://aistudio.google.com). In
-  the cloud we use **Vertex AI** (no key).
+  the cloud, model calls go through **Vertex AI** (no key).
 
 ## 1. Clone both repos
 

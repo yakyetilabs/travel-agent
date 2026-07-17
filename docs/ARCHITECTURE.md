@@ -19,7 +19,7 @@ They are **separate deployables** that share no code — only a wire contract.
 flowchart LR
     U[User / caller] -->|trip request| ORCH
 
-    subgraph ORCH[travel-agent  ·  SequentialAgent]
+    subgraph ORCH[travel-agent  ·  ADK Workflow graph]
         direction TB
         I[intake<br/>LLM + output_schema] --> FP[fare_prep<br/>LLM + build_fare_request tool]
         FP --> FE[fare_engine<br/>RemoteA2aAgent]
@@ -40,11 +40,11 @@ flowchart LR
     FA -->|PreTripApprovalOutput| U
 ```
 
-The orchestrator is a single `SequentialAgent` (`agents/orchestrator/agent.py`)
-whose five sub-agents run in order, passing data through **session state**. One of
-those sub-agents, `fare_engine`, is not local — it's a `RemoteA2aAgent` that calls
+The orchestrator is a single ADK `Workflow` graph (`agents/orchestrator/agent.py`):
+a linear chain of five stages that pass data through **session state**. One of
+those stages, `fare_engine`, is not local — it's a `RemoteA2aAgent` that calls
 the Go service over the network.
-The fifth, `finalizer`, is itself a two-step `SequentialAgent`: an LLM writes the prose summary, then a model-free assembler builds the structured output in code (§3).
+The fifth, `finalizer`, is itself a nested two-node `Workflow`: an LLM writes the prose summary, then a model-free assembler builds the structured output in code (§3).
 The `policy` stage uses the same split: `policy_checks` (LLM) only calls the check tools, then `policy_assembler` (no model) applies the decision rule and writes the `PolicyDecision`.
 Both repos end the same way on purpose: the last node before the caller (`quote_passthrough` there, `finalizer_assembler` here) is deterministic code, so no LLM sits between computed data and the consumer.
 
@@ -120,7 +120,7 @@ The FareQuote is extracted only from the **current invocation's** `fare_engine`
 event, so a stale quote from an earlier run in the same session can never leak
 into a later approval record.
 Why the finalizer is split this way - an LLM for prose, code for structure - and
-the alternatives we rejected are recorded in [DECISIONS.md](DECISIONS.md) §4.
+the rejected alternatives are recorded in [DECISIONS.md](DECISIONS.md) §4.
 
 Every policy tool returns a three-way verdict: `pass`, `needs_approval`, or `fail`
 (`agents/policy/rules.py` is the decision rule `policy_assembler` executes at runtime).
@@ -213,12 +213,9 @@ degrade gracefully rather than throwing:
 
 ---
 
-## 7. Current status (what is real vs. designed)
+## 7. Current status
 
-- ✅ **Local end-to-end** logic is implemented and the deterministic seam is
-  verified: `build_fare_request` output is accepted and priced by the engine.
-- ✅ **Contract tripwires** on both sides, **eval scaffolding** on both sides.
-- ⚠️ **Cloud deployment is designed but not provisioned** — no GCP project,
-  services, IAM bindings, CI, or Secret Manager are stood up yet. See
-  [`docs/CLOUD-READINESS.md`](CLOUD-READINESS.md) for the gap list. `adk eval` and
-  a live A2A round-trip require model credentials not present in the dev sandbox.
+- ✅ **Deployed.** Both services run privately on Cloud Run (`--no-allow-unauthenticated`); the orchestrator calls the engine over authenticated A2A in production, and external reviewers reach the Dev UI through per-identity IAP.
+- ✅ **Gated CI/CD.** A push to main runs the unit tests and the contract tripwire, runs the ADK evals when the diff can change agent behavior, then deploys to Cloud Run and smoke-tests the revision - keyless throughout via Workload Identity Federation.
+- ✅ **Contract tripwires** on both sides of the A2A boundary, verified in CI on every push.
+- ⚠️ **Deliberate scope limits remain** - no persistence or audit log, static fare tables in the engine, no automated rollback. The Known gaps section of the top-level `README.md` is the authoritative list; [`CLOUD-READINESS.md`](CLOUD-READINESS.md) records the readiness checklist the deployment was built against.

@@ -40,7 +40,9 @@ orchestrator_agent  -  ADK Workflow graph (START -> intake -> ... -> finalizer)
   intake        LlmAgent        collect trip + traveler fields          [output_schema]
   fare_prep     LlmAgent        marshal the trip into the engine request [deterministic tool]
   fare_engine   RemoteA2aAgent  remote Go service; prices the journey    [A2A]
-  policy        LlmAgent        corporate policy against the real quote  [deterministic tools]
+  policy        Workflow        nested graph: LLM routes to checks, code decides
+                  policy_checks        LlmAgent   calls the 4 policy check tools    [deterministic tools]
+                  policy_assembler     BaseAgent  applies the decision rule (rules.py), no LLM
   finalizer     Workflow        nested graph: prose by LLM, structure by code
                   summary_writer       LlmAgent   the 1-3 sentence human summary   [output_key]
                   finalizer_assembler  BaseAgent  assembles the record in pure Python, no LLM
@@ -57,6 +59,7 @@ orchestrator_agent  -  ADK Workflow graph (START -> intake -> ... -> finalizer)
   The $2000 cap is a trip budget cap: it applies to the quoted journey total - both legs of a round trip, all passengers on the booking, guests included.
   If the engine returns no quote (outage, timeout, or refusal to price), `check_budget` runs without a fare and returns `needs_approval`, so the trip escalates to a manager instead of being approved with its budget unverified.
   All thresholds are module constants in [tools/policy.py](tools/policy.py); the LLM neither applies policy itself nor passes thresholds to the tools.
+  The stage is split like the finalizer: `policy_checks` (LLM) only calls the tools, and `policy_assembler` (pure Python, [agents/policy/assembler.py](agents/policy/assembler.py)) applies the decision rule and writes the `PolicyDecision`, so the reasons in the record are the tools' own strings, never an LLM's paraphrase.
 - **finalizer** is a nested Workflow of two stages: `summary_writer` (LLM) writes the 1-3 sentence human summary - the only generative field in the output - and `finalizer_assembler` (a model-free custom agent) assembles `PreTripApprovalOutput` in pure Python from intake, policy, and fare results.
   The fare quote is copied verbatim from the current invocation's engine response, never retyped by a model, mirroring the engine's own deterministic quote passthrough.
 
@@ -98,9 +101,31 @@ The engineering around the agents is production-grade, even where the product su
 
 - **Private by default.** Both services run on Cloud Run with `--no-allow-unauthenticated`; the orchestrator authenticates to the engine with a short-lived Google identity token (`_GCPIdTokenAuth`), and external reviewer access is gated by IAP per identity.
 - **Least privilege.** Dedicated service accounts with minimal IAM (`roles/aiplatform.user` for Vertex AI, `roles/run.invoker` for the cross-service call).
-- **Keyless CI/CD.** Workload Identity Federation - no service-account keys are stored or generated. Merge to main deploys to Cloud Run, with the deploy **gated on unit tests, the contract tripwire, and the ADK evals** (model-in-the-loop on Vertex AI).
+- **Keyless CI/CD.** Workload Identity Federation - no service-account keys are stored or generated. Merge to main deploys to Cloud Run, with the deploy **gated on unit tests, the contract tripwire, and the ADK evals** (model-in-the-loop on Vertex AI). The eval job is scoped to agent-affecting diffs: a docs-only push deploys without billing an eval run, because a gate should be a function of the diff it gates.
 - **Resilience.** The orchestrator's agents share one model definition with an explicit exponential-backoff-with-jitter retry budget; when it is exhausted the serving layer degrades to a structured, retryable `503 {"error": "model_busy"}` rather than a stack trace.
 - **Stateless and horizontally scalable** - no session affinity.
+
+## Repository layout
+
+```
+agents/
+  orchestrator/     the Workflow graph wiring the whole pipeline; A2A client + ID-token auth for the engine
+  intake/           LlmAgent + Pydantic schemas: free text -> IntakeOutput
+  fare_prep/        LlmAgent: marshals the trip into the engine's FareQuoteRequest (one tool call)
+  policy/           nested Workflow: policy_checks (LLM) -> policy_assembler (code); rules.py holds the decision rule
+  finalizer/        nested Workflow: summary_writer (LLM) -> finalizer_assembler (code)
+  model.py          the shared Gemini model definition with the retry budget
+tools/
+  fare_request.py   the intake -> engine translator; all derivation (distance, season, booking class)
+  policy.py         the four three-way policy checks; all thresholds live here
+  clock.py          the injectable domain clock (TRAVEL_CLOCK_TODAY)
+eval/               ADK evalsets, scoring config, and the eval suite's own README
+tests/              unit tests, the A2A contract tripwire, assembler tests, and the enforced eval gate
+docs/               reader docs: architecture, decisions, lessons, deploy runbook
+.github/workflows/  CI/CD: tests -> evals (only on agent-shaping diffs) -> deploy + smoke test
+```
+
+Each `agents/<name>/` directory exposes a top-level `root_agent`, so any stage runs standalone with `adk run agents/<name>`.
 
 ## Run it yourself
 
@@ -125,10 +150,12 @@ adk web        # then open http://localhost:8000 and pick "orchestrator"
 
 ```bash
 pytest                                                                        # unit tests + contract tripwire (the enforced gate lives in tests/test_evals.py)
-adk eval agents/intake    eval/intake.evalset.json    --config_file_path eval/test_config.json
-adk eval agents/fare_prep eval/fare_prep.evalset.json --config_file_path eval/test_config.json
-adk eval agents/policy    eval/policy.evalset.json    --config_file_path eval/test_config.json
+TRAVEL_CLOCK_TODAY=2026-07-07 adk eval agents/intake    eval/intake.evalset.json    --config_file_path eval/test_config.json
+TRAVEL_CLOCK_TODAY=2026-07-07 adk eval agents/fare_prep eval/fare_prep.evalset.json --config_file_path eval/test_config.json
+TRAVEL_CLOCK_TODAY=2026-07-07 adk eval agents/policy    eval/policy.evalset.json    --config_file_path eval/test_config.json
 ```
+
+`TRAVEL_CLOCK_TODAY` freezes the domain clock to the date the eval references were authored, so date-derived values ("70 days in advance") reproduce on any calendar day - see [eval/README.md](eval/README.md).
 
 The contract tripwire reads the engine's agent card and asserts the orchestrator's expected enums match; any drift breaks the build. The eval sets verify that, given a known conversation or session state, each agent calls the right tools with the right arguments - and baseline evals must pass before merging changes to agent prompts or tools.
 
@@ -150,6 +177,14 @@ Deliberately scoped for a portfolio system; each is a known step toward a real d
 - **No automated rollback.** Cloud Run keeps the previous revision serving on failure, but the pipeline does not automatically revert or alert on a smoke-test failure.
 - **Model rate-limit backoff covers the orchestrator, not yet the fare engine.** Under Vertex AI dynamic shared quota a call can be throttled with `429 RESOURCE_EXHAUSTED`. The orchestrator handles this with a shared retry budget and a structured `503` on exhaustion (see [docs/DECISIONS.md](docs/DECISIONS.md)); the engine's inbound LLM is the remaining exposed path.
 - **Fare hold not honored.** Quote IDs are returned with an expiration, but there is no mechanism to guarantee the same fare if the user returns within the window.
+
+## Roadmap
+
+Next steps, documented before they are built (the direction matters more than the timing):
+
+- **Structured fast path at the engine's A2A boundary.** Accept a structured `DataPart` and price it without the inbound LLM, keeping LLM parsing as the fallback for free-text callers - tolerance for unknown agents, zero model cost and zero transcription risk for the known one.
+- **Publish the orchestrator as a discoverable A2A server.** Today it consumes an agent card; next it serves one, so external agents can discover and call the whole pre-trip approval pipeline as a single capability.
+- **Third-party caller auth.** An IAM story for agents outside this project calling either service, extending the current per-identity IAP model to machine callers.
 
 ## Further reading
 
