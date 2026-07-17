@@ -3,6 +3,11 @@ name: ci-cd
 # Test on every PR; test + deploy on push to main. Auth to GCP is keyless via
 # Workload Identity Federation (no service-account keys). Required repo variables:
 #   GCP_PROJECT, GCP_REGION, GCP_WIF_PROVIDER, GCP_DEPLOY_SA  (see scripts/setup-wif.sh)
+#
+# The evals job is scoped: model-in-the-loop evals measure agent behavior, so
+# they run only when the diff can change agent behavior (the `changes` job).
+# A docs-only push skips them and still deploys - a gate should be a function
+# of the diff it gates (docs/DECISIONS.md section 10).
 
 on:
   push:
@@ -25,6 +30,39 @@ jobs:
       - name: Tests (unit + contract tripwire)
         run: uv run pytest -q
 
+  changes:
+    # Decides whether this diff can change agent behavior. Plain git diff on
+    # purpose (no third-party action). Unknown or unusable diff base (first
+    # push, force-push) defaults to relevant=true - when in doubt, run the
+    # evals.
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.diff.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        name: Detect agent-shaping changes
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BASE" 2>/dev/null; then
+            echo "No usable diff base; defaulting to relevant=true"
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          CHANGED=$(git diff --name-only "$BASE" "${{ github.sha }}")
+          echo "Changed files:"; echo "$CHANGED"
+          if echo "$CHANGED" | grep -qE '^(agents/|tools/|eval/|tests/test_evals\.py|pyproject\.toml|uv\.lock|\.github/workflows/)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
   evals:
     # ADK evals are model-in-the-loop (Vertex AI via WIF), so they cannot run on
     # forked PRs, which don't get id-token permissions. The `adk eval` CLI does
@@ -34,8 +72,8 @@ jobs:
     # evalsets get their first verified baseline here (see eval/README.md): if a
     # run fails, decide agent regression vs reference drift — never fix both in
     # one commit (CLAUDE.md).
-    needs: test
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    needs: [test, changes]
+    if: needs.changes.outputs.relevant == 'true' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -62,8 +100,13 @@ jobs:
         run: uv run pytest tests/test_evals.py -v
 
   deploy:
-    needs: [test, evals]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Runs when tests pass AND evals either passed or were skipped BECAUSE the
+    # diff could not change agent behavior (changes.relevant == false). Any
+    # other evals outcome - failure, or skipped for an unexpected reason -
+    # blocks the deploy. `!cancelled()` is required: with a skipped job in
+    # `needs`, the default success() condition would skip deploy entirely.
+    needs: [test, changes, evals]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.test.result == 'success' && needs.changes.result == 'success' && (needs.evals.result == 'success' || (needs.evals.result == 'skipped' && needs.changes.outputs.relevant == 'false')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -250,3 +250,28 @@ The response text the eval grades is now code-emitted, so the policy evalset pas
 The stage is faster (about 14s vs 25s per eval run) because the model no longer generates the JSON.
 The LLM half's remaining judgment - which tools to call, the no-argument `check_budget` on engine failure, skipping duration for one-way trips - is exactly what the evalset's tool trajectories pin.
 The state contract is unchanged: `policy_decision` holds a JSON string the finalizer's `parse_policy_decision` consumes as before, pinned by a round-trip test in `tests/test_policy_assembler.py`.
+
+---
+
+## 10. The eval gate is scoped to agent-shaping diffs
+
+**Decision.**
+The CI `evals` job runs only when the push or PR touches paths that can change agent behavior: `agents/`, `tools/`, `eval/`, `tests/test_evals.py`, the dependency manifests, or the workflow itself.
+A `changes` job computes this with a plain `git diff` (no third-party action); `deploy` proceeds when evals passed, or when they were skipped precisely because the diff could not change agent behavior.
+
+**Context.**
+The 2026-07-16 incident began with a README-only commit paying for - and being blocked by - a model-in-the-loop eval run that could not tell anything about that commit.
+A gate should be a function of the diff it gates; model evals are a function of the agents, tools, references, and model, none of which a docs commit touches.
+This automates the discipline the repo already had as prose ("eval before any prompt change") without giving up the enforced gate; the standard arguments against model evals in CI - cost, stochastic single-sample scoring, an external service in the deploy path - are answered by scoping the job rather than deleting it.
+
+**Rejected alternatives.**
+- Workflow-level `on.push.paths` filtering.
+  Rejected: it would skip the whole workflow, including unit tests and deploy, not just the evals job.
+- `dorny/paths-filter` or similar marketplace actions.
+  Rejected: a third-party dependency for what one `git diff | grep` does.
+- Leaving the gate unconditional now that its scores are deterministic (§8, §9).
+  Rejected: intake's response match is still model-dependent, and a docs commit still should not bill Vertex tokens for zero information.
+
+**Consequences.**
+Docs-only pushes deploy without an eval run; agent-touching pushes keep the full gate.
+A failed or unexpectedly-skipped evals job still blocks deploy (`deploy` requires `evals.result == 'success'` or the explicit skipped-because-irrelevant pair), and an unusable diff base (first push, force-push) defaults to running the evals.
