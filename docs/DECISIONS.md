@@ -225,3 +225,28 @@ Production behavior is unchanged: with the variable unset, `clock.today()` is `d
 The fixed 2026-09 trip dates in the evalsets are now permanently valid, and the mid-September refresh chore formerly documented in eval/README.md is retired.
 The translator's explicit `today` parameter keeps precedence over the environment, so callers that already inject a date are unaffected.
 The seam is pinned by tests/test_clock.py: the override, the unset fallback, the loud failure, both consumers, and the parameter precedence.
+
+---
+
+## 9. The policy decision is assembled in code, not transcribed by the LLM
+
+**Decision.**
+Split the policy stage the same way §4 split the finalizer: `policy_checks` (LlmAgent) only routes to the four deterministic check tools, and `policy_assembler` (a model-free BaseAgent, `agents/policy/assembler.py`) reads the tools' results from the current invocation's events, applies the decision rule from `agents/policy/rules.py`, compiles one verbatim tool reason per executed check in call order, and emits the `PolicyDecision` - as the stage's final text event and as a JSON string in state under `policy_decision`, preserving the finalizer's parsing contract.
+
+**Context.**
+The transcribing LlmAgent failed CI on 2026-07-16: it nondeterministically dropped three of four reason strings and wrapped its JSON in markdown fences, scoring 0.47 against the 0.5 response-match threshold while making the correct decision and the correct tool calls (trajectory 1.0).
+The prompt's own latitude ("especially fail/needs_approval ones") permitted the omission, and the decision rule existed twice - as prose in the prompt and as tested-but-unwired code in `rules.py`.
+Rubric or overlap grading that never exact-matches reason text would tolerate this failure class; this project's stance (§4) is to remove the lossy copy path instead of loosening the check.
+
+**Rejected alternatives.**
+- Tightening the prompt to demand verbatim transcription of every reason.
+  Rejected: it lowers the probability of the flake without removing the surface; "copy verbatim" in a prompt is the fix §4 already found insufficient.
+- Loosening the metric (a lower threshold, or rubric grading).
+  Rejected: production keeps an LLM transcribing a decision either way, and the audit record stays probabilistic.
+
+**Consequences.**
+The response text the eval grades is now code-emitted, so the policy evalset passes deterministically with zero reference edits (verified twice post-change, both runs green).
+`rules.py` is the runtime decision path, ending the prompt/code duplication.
+The stage is faster (about 14s vs 25s per eval run) because the model no longer generates the JSON.
+The LLM half's remaining judgment - which tools to call, the no-argument `check_budget` on engine failure, skipping duration for one-way trips - is exactly what the evalset's tool trajectories pin.
+The state contract is unchanged: `policy_decision` holds a JSON string the finalizer's `parse_policy_decision` consumes as before, pinned by a round-trip test in `tests/test_policy_assembler.py`.

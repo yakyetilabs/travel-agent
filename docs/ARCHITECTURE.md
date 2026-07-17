@@ -23,8 +23,9 @@ flowchart LR
         direction TB
         I[intake<br/>LLM + output_schema] --> FP[fare_prep<br/>LLM + build_fare_request tool]
         FP --> FE[fare_engine<br/>RemoteA2aAgent]
-        FE --> P[policy<br/>LLM + 4 deterministic tools]
-        P --> SW[summary_writer<br/>LLM, prose only]
+        FE --> PC[policy_checks<br/>LLM + 4 deterministic tools]
+        PC --> PA[policy_assembler<br/>deterministic, no LLM]
+        PA --> SW[summary_writer<br/>LLM, prose only]
         SW --> FA[finalizer_assembler<br/>deterministic, no LLM]
     end
 
@@ -44,6 +45,7 @@ whose five sub-agents run in order, passing data through **session state**. One 
 those sub-agents, `fare_engine`, is not local — it's a `RemoteA2aAgent` that calls
 the Go service over the network.
 The fifth, `finalizer`, is itself a two-step `SequentialAgent`: an LLM writes the prose summary, then a model-free assembler builds the structured output in code (§3).
+The `policy` stage uses the same split: `policy_checks` (LLM) only calls the check tools, then `policy_assembler` (no model) applies the decision rule and writes the `PolicyDecision`.
 Both repos end the same way on purpose: the last node before the caller (`quote_passthrough` there, `finalizer_assembler` here) is deterministic code, so no LLM sits between computed data and the consumer.
 
 ---
@@ -99,7 +101,8 @@ substitution reads it.
 | **intake**     | user message                           | Parses free text → structured trip; lists `missing_fields`; sets `ready_for_policy`.          | `intake_output`       |
 | **fare_prep**  | `{intake_output}`                      | Calls `build_fare_request(...)` → derives the journey's fare components (distance, route, and per-leg season, advance days, booking class).| `fare_request`        |
 | **fare_engine**| `fare_request` (in conversation)       | A2A call to the Go service; its `pricing`→`quote_passthrough` pipeline returns the `FareQuote` verbatim from the tool. | — (reply in history)  |
-| **policy**     | `{intake_output}` + FareQuote in history | Calls `check_budget` (uses `total_fare`), `check_travel_class`, `check_advance_purchase`, `check_max_trip_duration`; each returns a `pass`/`needs_approval`/`fail` verdict. | `policy_decision`     |
+| **policy_checks** | `{intake_output}` + FareQuote in history | Calls `check_budget` (uses `total_fare`), `check_travel_class`, `check_advance_purchase`, `check_max_trip_duration`; each returns a `pass`/`needs_approval`/`fail` verdict. Makes no decision itself. | — (tool results as events) |
+| **policy_assembler** | this invocation's tool-result events + `{intake_output}` | Pure Python (`agents/policy/assembler.py`): applies the decision rule (`rules.py`), compiles the verbatim tool reasons in call order, emits the `PolicyDecision` JSON. No LLM. | `policy_decision`     |
 | **summary_writer** | `{intake_output}`, `{policy_decision}`, FareQuote in history | Writes the 1-3 sentence human summary - the output's only LLM-authored field. No tools, no schema. | `approval_summary`    |
 | **finalizer_assembler** | session state + this invocation's `fare_engine` event | Pure Python (`agents/finalizer/assembler.py`): copies traveler/trip, parses the policy JSON, extracts the FareQuote verbatim, derives `final_decision`, attaches the summary. No LLM. | `orchestrator_output` |
 
@@ -120,7 +123,7 @@ Why the finalizer is split this way - an LLM for prose, code for structure - and
 the alternatives we rejected are recorded in [DECISIONS.md](DECISIONS.md) §4.
 
 Every policy tool returns a three-way verdict: `pass`, `needs_approval`, or `fail`
-(`agents/policy/rules.py` is the canonical decision rule).
+(`agents/policy/rules.py` is the decision rule `policy_assembler` executes at runtime).
 Any `fail` denies the trip; otherwise any `needs_approval` yields `needs_review`
 with `requires_manager_approval=True` - real pre-trip approval escalates
 out-of-policy requests to a manager rather than flat-denying them.

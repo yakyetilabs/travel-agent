@@ -18,7 +18,9 @@ from agents.fare_prep.agent import root_agent as fare_prep_agent
 from agents.finalizer.agent import summary_writer
 from agents.intake.agent import root_agent as intake_agent
 from agents.model import gemini_flash
-from agents.policy.agent import root_agent as policy_agent
+# policy's root is now a model-free Workflow (LLM half + assembler, like the
+# finalizer); the retry contract applies to its inner LlmAgent.
+from agents.policy.agent import policy_checks
 from model_errors import install_model_error_handler
 
 
@@ -51,7 +53,7 @@ def test_every_pipeline_llm_agent_uses_the_shared_retry_model():
     # Regression guard: reverting any agent to the bare string "gemini-2.5-flash"
     # silently disables retry (see the single-attempt test below) and must fail
     # here.
-    for agent in (intake_agent, fare_prep_agent, policy_agent, summary_writer):
+    for agent in (intake_agent, fare_prep_agent, policy_checks, summary_writer):
         assert agent.model is gemini_flash
 
 
