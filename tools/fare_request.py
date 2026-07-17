@@ -25,6 +25,8 @@ import math
 from datetime import date, datetime
 from typing import Callable, Literal
 
+from tools import clock
+
 # --- Engine boundary vocabulary (DUPLICATED ON PURPOSE) ---------------------
 #
 # These literals and lists mirror the fare engine's own exported vocabularies
@@ -261,7 +263,7 @@ class FareRequestTranslator:
             dep = datetime.strptime(departure_date, "%Y-%m-%d").date()
         except (ValueError, TypeError):
             return {"ok": False, "error": "departure_date must be YYYY-MM-DD"}
-        ref = date.today()
+        ref = clock.today()
         if today is not None:
             try:
                 ref = datetime.strptime(today, "%Y-%m-%d").date()

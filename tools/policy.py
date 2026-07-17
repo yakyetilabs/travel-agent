@@ -10,7 +10,9 @@ LLM decides when to call these tools but cannot pass — and therefore cannot
 weaken — any threshold.
 """
 
-from datetime import date, datetime
+from datetime import datetime
+
+from tools import clock
 
 # Trip budget cap: the quoted journey total (all legs, all passengers on the
 # booking, taxes included). Guest travelers count against the same cap.
@@ -81,7 +83,7 @@ def check_advance_purchase(departure_date_str: str) -> dict:
             "verdict": "fail",
             "reason": "invalid departure date format, use YYYY-MM-DD",
         }
-    days_until = (departure - date.today()).days
+    days_until = (departure - clock.today()).days
     if days_until >= MIN_ADVANCE_DAYS:
         return {
             "verdict": "pass",

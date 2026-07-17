@@ -198,3 +198,30 @@ The orchestration is a graph rather than a list: the stages are `root_agent.grap
 Running the engine as a graph node changed the shape of its result in the event stream, and this is the one real hazard the migration surfaced: the graph models the remote `fare_engine` round trip as a `compute_fare` tool call, so the FareQuote now arrives as a function response rather than the model text part the flat pipeline produced.
 The deterministic assembler reads the quote from the fare_engine event, so it now accepts either shape (`agents/finalizer/assembler.py`), and both are pinned in `tests/test_finalizer_assembler.py`; without that, `fare_quote` would serialize as null in production even though every unit test passed, which is exactly what the end-to-end run caught and the shape-blind tests did not.
 Verified end to end after the migration: the standard JFK-LAX query runs through the graph to an approved decision carrying the full $288.90 quote with `fare_rules` populated on both components, matching the result the SequentialAgent produced, and the deprecation warning is gone from module load and from the test suite.
+
+---
+
+## 8. Freeze the domain clock, not the process clock
+
+**Decision.**
+Make "today" an explicit, injectable dependency of the date-deriving tools: `tools/clock.py` exposes `today()`, which returns the real calendar date unless the `TRAVEL_CLOCK_TODAY` environment variable (ISO `YYYY-MM-DD`) overrides it.
+`check_advance_purchase` (tools/policy.py) and the fare-request translator (tools/fare_request.py) read the clock through this seam; the eval gate (tests/test_evals.py) pins `TRAVEL_CLOCK_TODAY=2026-07-07` - the date the evalset references were authored - and manual `adk eval` CLI runs pass the same variable.
+
+**Context.**
+The evalsets' reference responses embed wall-clock-derived values: every "N days in advance" and `advance_purchase_days` equals `departure - 2026-07-07`, true only on the authoring date.
+From the next day the references drift one token per day, and once a trip date passes, the derivation flips outright: fare_prep's `international_mixed_pax` case (departure 2026-07-15) began returning "departure_date is in the past" on 2026-07-16, deterministically failing CI regardless of agent behavior (lesson 16).
+A gate that depends on the wall clock is not a function of the diff it gates.
+
+**Rejected alternatives.**
+- freezegun / time-machine in the eval extra.
+  Rejected: a new dependency that freezes the entire process clock, risking interference with google-auth token expiry checks and asyncio timers, and it cannot reach the separate `adk eval` CLI process, so local CLI runs would diverge from the gate.
+- Periodically refreshing trip dates and regenerating references.
+  Rejected: a recurring chore that re-breaks every few months and reads as a design smell to a reviewer cloning the repo.
+- Stripping day-counts from graded reason strings.
+  Rejected: it weakens the audit record the policy agent exists to produce, and it cannot survive the verdict flip once a date actually passes.
+
+**Consequences.**
+Production behavior is unchanged: with the variable unset, `clock.today()` is `date.today()`; an invalid value raises `ValueError` loudly rather than silently un-freezing every reference.
+The fixed 2026-09 trip dates in the evalsets are now permanently valid, and the mid-September refresh chore formerly documented in eval/README.md is retired.
+The translator's explicit `today` parameter keeps precedence over the environment, so callers that already inject a date are unaffected.
+The seam is pinned by tests/test_clock.py: the override, the unset fallback, the loud failure, both consumers, and the parameter precedence.

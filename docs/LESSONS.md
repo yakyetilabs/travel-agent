@@ -280,6 +280,25 @@ real end-to-end test anyway. The dev UI is a convenience, not the product.
 suspect **origin/CSRF/app-layer** handling, not IAM. Don't reach for IAM changes
 for an app-layer 403.
 
+### 16. Eval references that embed the wall clock rot daily, then hard-break
+
+**Symptom.** A README-only commit failed the CI eval gate, and re-runs could not
+go green: `fare_prep`'s `international_mixed_pax` case returned
+`"departure_date is in the past"` instead of its baked success JSON.
+
+**Cause.** The reference responses embed values derived from `date.today()` at
+authoring time ("70 days in advance", `advance_purchase_days`). They were true
+exactly on 2026-07-07 (the authoring date); every later run drifts one token
+per day, and once a trip date passes, the tool's **verdict** flips - no metric
+looseness survives that.
+
+**Fix.** Make the clock injectable (`tools/clock.py`, `TRAVEL_CLOCK_TODAY`) and
+freeze it to the authoring date in the eval gate (DECISIONS.md §8).
+
+**Concept.** Anything a tool derives from the wall clock is an **input in
+disguise**. A golden reference is reproducible only if every input is pinned -
+including time. Freeze the domain's clock, not the process's.
+
 ---
 
 ## Meta-lessons

@@ -18,7 +18,16 @@ from pathlib import Path
 
 import pytest
 
+from tools import clock
+
 _ROOT = Path(__file__).resolve().parent.parent
+
+# The references were authored on 2026-07-07 (commits db82710, 79b37e9): every
+# baked day-count ("70 days in advance", advance_purchase_days) equals
+# departure minus this date. Freezing the domain clock keeps them permanently
+# valid; unset, they rot one token per day and hard-break once the 2026-09
+# trip dates pass (docs/LESSONS.md lesson 16, docs/DECISIONS.md §8).
+EVALSET_AUTHORING_DATE = "2026-07-07"
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("RUN_ADK_EVALS") != "1",
@@ -47,6 +56,12 @@ def _require_model_credentials() -> None:
             "GOOGLE_CLOUD_LOCATION (and ADC), or GOOGLE_API_KEY/GEMINI_API_KEY. "
             "A credential-less eval run is not meaningful."
         )
+
+
+@pytest.fixture(autouse=True)
+def _freeze_domain_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the domain clock to the evalset authoring date for every eval run."""
+    monkeypatch.setenv(clock.ENV_VAR, EVALSET_AUTHORING_DATE)
 
 
 @pytest.mark.asyncio

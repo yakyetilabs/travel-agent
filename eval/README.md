@@ -10,10 +10,20 @@ The scoring dependencies are an optional extra; install once with
 `uv sync --extra eval`.
 
 ```bash
-adk eval agents/intake    eval/intake.evalset.json    --config_file_path eval/test_config.json
-adk eval agents/fare_prep eval/fare_prep.evalset.json --config_file_path eval/test_config.json
-adk eval agents/policy    eval/policy.evalset.json    --config_file_path eval/test_config.json
+TRAVEL_CLOCK_TODAY=2026-07-07 adk eval agents/intake    eval/intake.evalset.json    --config_file_path eval/test_config.json
+TRAVEL_CLOCK_TODAY=2026-07-07 adk eval agents/fare_prep eval/fare_prep.evalset.json --config_file_path eval/test_config.json
+TRAVEL_CLOCK_TODAY=2026-07-07 adk eval agents/policy    eval/policy.evalset.json    --config_file_path eval/test_config.json
 ```
+
+`TRAVEL_CLOCK_TODAY` freezes the **domain clock** (`tools/clock.py`) to
+2026-07-07, the date these references were authored.
+Every date-derived reference value ("N days in advance", `advance_purchase_days`,
+booking classes) equals `departure - 2026-07-07`, so the frozen clock makes the
+evalsets reproducible on any calendar day; unset, they rot one token per day and
+hard-break once the 2026-09 trip dates pass (docs/LESSONS.md lesson 16,
+docs/DECISIONS.md §8).
+The pytest gate below sets the variable itself (autouse fixture), so only manual
+CLI runs need the prefix.
 
 The `--config_file_path` flag is required: the `adk eval` CLI does **not**
 auto-discover `test_config.json` from the evalset's folder (only the pytest
@@ -49,8 +59,9 @@ Thresholds live in [`test_config.json`](test_config.json):
   origin/destination/trip_type/dates/class/passengers (omitting `return_date`
   for one-way trips). Graded primarily on the **tool trajectory**, which is
   deterministic. The *derived* `fare_request` (per-leg fare components: distance,
-  booking class, season, advance-purchase days) depends on the run date, so the
-  reference `final_response` is illustrative and `response_match` is lenient.
+  booking class, season, advance-purchase days) is date-derived; under the
+  frozen domain clock (see Run above) it reproduces the reference exactly, and
+  `response_match` stays lenient as defense in depth.
 - **`policy.evalset.json`** - pins the policy agent's **LLM-owned** behaviors only:
   which tools it calls, argument transcription (`total_fare` from the FareQuote in
   conversation history, dates and cabin from `{intake_output}` state), and faithful
@@ -90,11 +101,12 @@ each case's trip was translated with `build_fare_request` (today=2026-07-07) and
 priced with the engine's `fare.Calculate` (`travel-fare-engine` repo), so the
 embedded quotes (including the $288.90 JFK-LAX journey that reproduces the
 production-verified healthy path) are regenerable the same way.
-Its reference responses embed run-date-dependent days-in-advance numbers
-(same stance as fare_prep: illustrative, graded leniently), and all evalsets
-share the fixed 2026-09 trip dates, which `check_advance_purchase` and
-`build_fare_request` will start rejecting mid-September 2026; refresh dates and
-regenerate references then.
+Its reference responses embed days-in-advance numbers derived from the domain
+clock; under `TRAVEL_CLOCK_TODAY=2026-07-07` (see Run above) they match the
+tools' output exactly, on any calendar day.
+The old mid-September-2026 date-refresh chore is retired: the fixed 2026-09
+trip dates stay permanently valid because the frozen clock, not the wall
+clock, drives `check_advance_purchase` and `build_fare_request`.
 
 ## Data hygiene
 
